@@ -4,10 +4,27 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.common.database import Base, TimestampMixin
 
 
+class ServiceGroup(Base, TimestampMixin):
+    __tablename__ = "service_groups"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    sort_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
+
 class Service(Base, TimestampMixin):
     __tablename__ = "services"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("service_groups.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    code: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
@@ -22,7 +39,11 @@ class MunicipalityServiceConfig(Base, TimestampMixin):
             "service_id",
             name="uq_municipality_service_configs_municipality_service",
         ),
-        CheckConstraint("unit_price >= 0", name="ck_municipality_service_configs_non_negative_price"),
+        CheckConstraint("sale_price >= 0", name="ck_municipality_service_configs_non_negative_sale_price"),
+        CheckConstraint(
+            "support_price IS NULL OR support_price >= 0",
+            name="ck_municipality_service_configs_non_negative_support_price",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -37,5 +58,6 @@ class MunicipalityServiceConfig(Base, TimestampMixin):
         index=True,
     )
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    unit_price: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sale_price: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    support_price: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)

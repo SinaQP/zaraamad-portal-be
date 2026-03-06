@@ -7,6 +7,7 @@ Phase 1 includes:
 - Municipality management
 - Assign users to municipalities
 - Service catalog management
+- Service group management
 - Municipality-specific service pricing
 
 Refresh token is not implemented in this phase to keep authentication flow minimal and focused on access-token based APIs.
@@ -106,6 +107,11 @@ pytest
 - `GET /services/{id}`
 - `PATCH /services/{id}`
 - `DELETE /services/{id}`
+- `POST /service-groups`
+- `GET /service-groups`
+- `GET /service-groups/{id}`
+- `PATCH /service-groups/{id}`
+- `DELETE /service-groups/{id}`
 - `GET /municipalities/{municipality_id}/services`
 - `PUT /municipalities/{municipality_id}/services`
 - `PATCH /municipality-service-configs/{id}`
@@ -116,6 +122,14 @@ Bulk upsert behavior for `PUT /municipalities/{municipality_id}/services`:
 - Creates missing rows
 - Updates existing rows
 - Items omitted from request remain unchanged
+
+Pricing fields for municipality service config:
+- `sale_price` is required
+- `support_price` is optional (`null` is valid)
+
+Catalog code behavior:
+- `service_groups.code` can be duplicated
+- `services.code` can be duplicated
 
 ## Sample Requests
 

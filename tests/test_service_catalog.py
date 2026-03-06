@@ -66,66 +66,286 @@ def _admin_headers(client: TestClient, db_session: Session) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _create_service(client: TestClient, headers: dict[str, str], name: str) -> int:
+def _create_service_group(
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    code: str,
+    name: str,
+    sort_order: int = 10,
+) -> int:
     response = client.post(
-        "/services",
+        "/service-groups",
         headers=headers,
         json={
+            "code": code,
             "name": name,
-            "description": f"{name} description",
-            "sort_order": 10,
+            "description": f"{name} services",
+            "sort_order": sort_order,
         },
     )
     assert response.status_code == 201
     return response.json()["id"]
 
 
-def test_create_service(client: TestClient, db_session: Session) -> None:
-    headers = _admin_headers(client=client, db_session=db_session)
-
+def _create_service(
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    group_id: int,
+    code: str,
+    name: str,
+    sort_order: int = 10,
+) -> int:
     response = client.post(
         "/services",
         headers=headers,
         json={
-            "name": "Security Services",
-            "description": "On-site security.",
+            "group_id": group_id,
+            "code": code,
+            "name": name,
+            "description": f"{name} description",
+            "sort_order": sort_order,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+def test_create_service_group(client: TestClient, db_session: Session) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+
+    response = client.post(
+        "/service-groups",
+        headers=headers,
+        json={
+            "code": "security",
+            "name": "Security",
+            "description": "Security services",
             "sort_order": 1,
         },
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["name"] == "Security Services"
+    assert data["code"] == "security"
+    assert data["name"] == "Security"
     assert data["is_active"] is True
 
 
-def test_update_service(client: TestClient, db_session: Session) -> None:
+def test_update_service_group(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    service_id = _create_service(client=client, headers=headers, name="Support")
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="taxes",
+        name="Taxes",
+    )
+
+    response = client.patch(
+        f"/service-groups/{group_id}",
+        headers=headers,
+        json={"name": "Tax Services", "sort_order": 20},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["name"] == "Tax Services"
+    assert data["sort_order"] == 20
+
+
+def test_duplicate_service_group_code_is_allowed(client: TestClient, db_session: Session) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+
+    first_response = client.post(
+        "/service-groups",
+        headers=headers,
+        json={
+            "code": "shared-code",
+            "name": "Group One",
+            "description": None,
+            "sort_order": 1,
+        },
+    )
+    second_response = client.post(
+        "/service-groups",
+        headers=headers,
+        json={
+            "code": "shared-code",
+            "name": "Group Two",
+            "description": None,
+            "sort_order": 2,
+        },
+    )
+    assert first_response.status_code == 201
+    assert second_response.status_code == 201
+
+
+def test_deactivate_service_group(client: TestClient, db_session: Session) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="renovation",
+        name="Renovation",
+    )
+
+    response = client.delete(f"/service-groups/{group_id}", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
+
+
+def test_create_service_under_group_and_filter_by_group(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    security_group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="security",
+        name="Security",
+    )
+    infra_group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="infrastructure",
+        name="Infrastructure",
+    )
+
+    _create_service(
+        client=client,
+        headers=headers,
+        group_id=security_group_id,
+        code="camera-monitoring",
+        name="Camera Monitoring",
+    )
+    _create_service(
+        client=client,
+        headers=headers,
+        group_id=infra_group_id,
+        code="fiber-upgrade",
+        name="Fiber Upgrade",
+    )
+
+    response = client.get(
+        "/services",
+        headers=headers,
+        params={"group_id": security_group_id},
+    )
+    assert response.status_code == 200
+    services = response.json()
+    assert len(services) == 1
+    assert services[0]["group_id"] == security_group_id
+    assert services[0]["group"]["code"] == "security"
+
+
+def test_update_service_group_assignment(client: TestClient, db_session: Session) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    first_group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="miscellaneous",
+        name="Miscellaneous",
+    )
+    second_group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="support",
+        name="Support",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=first_group_id,
+        code="hotline",
+        name="Hotline",
+    )
 
     response = client.patch(
         f"/services/{service_id}",
         headers=headers,
-        json={"name": "Support Updated", "sort_order": 99},
+        json={"group_id": second_group_id},
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "Support Updated"
-    assert data["sort_order"] == 99
+    assert data["group_id"] == second_group_id
+    assert data["group"]["id"] == second_group_id
+
+
+def test_duplicate_service_code_is_allowed(client: TestClient, db_session: Session) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="duplicate-service-code-group",
+        name="Duplicate Service Code Group",
+    )
+
+    first_response = client.post(
+        "/services",
+        headers=headers,
+        json={
+            "group_id": group_id,
+            "code": "shared-service-code",
+            "name": "Service One",
+            "description": None,
+            "sort_order": 1,
+        },
+    )
+    second_response = client.post(
+        "/services",
+        headers=headers,
+        json={
+            "group_id": group_id,
+            "code": "shared-service-code",
+            "name": "Service Two",
+            "description": None,
+            "sort_order": 2,
+        },
+    )
+    assert first_response.status_code == 201
+    assert second_response.status_code == 201
 
 
 def test_deactivate_service(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    service_id = _create_service(client=client, headers=headers, name="Renovation")
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="other",
+        name="Other",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="general-service",
+        name="General Service",
+    )
 
     response = client.delete(f"/services/{service_id}", headers=headers)
     assert response.status_code == 200
     assert response.json()["is_active"] is False
 
 
-def test_create_and_list_municipality_service_config(client: TestClient, db_session: Session) -> None:
+def test_create_municipality_service_config_and_list(
+    client: TestClient,
+    db_session: Session,
+) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
     municipality = _create_municipality(db_session=db_session)
-    service_id = _create_service(client=client, headers=headers, name="Miscellaneous")
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="security",
+        name="Security",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="guarding",
+        name="Guarding",
+    )
 
     upsert_response = client.put(
         f"/municipalities/{municipality.id}/services",
@@ -135,7 +355,8 @@ def test_create_and_list_municipality_service_config(client: TestClient, db_sess
                 {
                     "service_id": service_id,
                     "is_enabled": True,
-                    "unit_price": 4000000,
+                    "sale_price": 4000000,
+                    "support_price": 800000,
                     "notes": "Initial setup",
                 }
             ]
@@ -146,10 +367,15 @@ def test_create_and_list_municipality_service_config(client: TestClient, db_sess
     assert len(upsert_data) == 1
     assert upsert_data[0]["municipality_id"] == municipality.id
     assert upsert_data[0]["service_id"] == service_id
+    assert upsert_data[0]["group_id"] == group_id
+    assert upsert_data[0]["sale_price"] == 4000000
+    assert upsert_data[0]["support_price"] == 800000
 
     list_response = client.get(f"/municipalities/{municipality.id}/services", headers=headers)
     assert list_response.status_code == 200
-    assert len(list_response.json()) == 1
+    list_data = list_response.json()
+    assert len(list_data) == 1
+    assert list_data[0]["group_code"] == "security"
 
 
 def test_bulk_upsert_municipality_service_configs_omitted_items_remain_unchanged(
@@ -158,10 +384,34 @@ def test_bulk_upsert_municipality_service_configs_omitted_items_remain_unchanged
 ) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
     municipality = _create_municipality(db_session=db_session)
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="operations",
+        name="Operations",
+    )
 
-    service_a = _create_service(client=client, headers=headers, name="Security")
-    service_b = _create_service(client=client, headers=headers, name="Support")
-    service_c = _create_service(client=client, headers=headers, name="Other")
+    service_a = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="ops-a",
+        name="Ops A",
+    )
+    service_b = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="ops-b",
+        name="Ops B",
+    )
+    service_c = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="ops-c",
+        name="Ops C",
+    )
 
     first_upsert = client.put(
         f"/municipalities/{municipality.id}/services",
@@ -171,13 +421,15 @@ def test_bulk_upsert_municipality_service_configs_omitted_items_remain_unchanged
                 {
                     "service_id": service_a,
                     "is_enabled": True,
-                    "unit_price": 1000000,
+                    "sale_price": 1000000,
+                    "support_price": 100000,
                     "notes": "A1",
                 },
                 {
                     "service_id": service_b,
                     "is_enabled": True,
-                    "unit_price": 2000000,
+                    "sale_price": 2000000,
+                    "support_price": 200000,
                     "notes": "B1",
                 },
             ]
@@ -193,13 +445,15 @@ def test_bulk_upsert_municipality_service_configs_omitted_items_remain_unchanged
                 {
                     "service_id": service_a,
                     "is_enabled": True,
-                    "unit_price": 1100000,
+                    "sale_price": 1100000,
+                    "support_price": 120000,
                     "notes": "A2",
                 },
                 {
                     "service_id": service_c,
                     "is_enabled": True,
-                    "unit_price": 3000000,
+                    "sale_price": 3000000,
+                    "support_price": None,
                     "notes": "C1",
                 },
             ]
@@ -213,18 +467,31 @@ def test_bulk_upsert_municipality_service_configs_omitted_items_remain_unchanged
     assert len(items) == 3
 
     item_map = {item["service_id"]: item for item in items}
-    assert item_map[service_a]["unit_price"] == 1100000
-    assert item_map[service_b]["unit_price"] == 2000000
-    assert item_map[service_c]["unit_price"] == 3000000
+    assert item_map[service_a]["sale_price"] == 1100000
+    assert item_map[service_b]["sale_price"] == 2000000
+    assert item_map[service_c]["sale_price"] == 3000000
+    assert item_map[service_b]["support_price"] == 200000
 
 
-def test_duplicate_service_id_in_bulk_payload_is_rejected(
+def test_duplicate_municipality_service_pair_is_rejected(
     client: TestClient,
     db_session: Session,
 ) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
     municipality = _create_municipality(db_session=db_session)
-    service_id = _create_service(client=client, headers=headers, name="Duplicate")
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="duplicate-check",
+        name="Duplicate Check",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="duplicate-service",
+        name="Duplicate Service",
+    )
 
     response = client.put(
         f"/municipalities/{municipality.id}/services",
@@ -234,13 +501,15 @@ def test_duplicate_service_id_in_bulk_payload_is_rejected(
                 {
                     "service_id": service_id,
                     "is_enabled": True,
-                    "unit_price": 1000,
+                    "sale_price": 1000,
+                    "support_price": None,
                     "notes": None,
                 },
                 {
                     "service_id": service_id,
                     "is_enabled": False,
-                    "unit_price": 1000,
+                    "sale_price": 1200,
+                    "support_price": None,
                     "notes": None,
                 },
             ]
@@ -249,10 +518,22 @@ def test_duplicate_service_id_in_bulk_payload_is_rejected(
     assert response.status_code == 422
 
 
-def test_price_cannot_be_negative(client: TestClient, db_session: Session) -> None:
+def test_sale_price_is_required(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
     municipality = _create_municipality(db_session=db_session)
-    service_id = _create_service(client=client, headers=headers, name="Negative Price")
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="required-sale",
+        name="Required Sale",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="required-sale-service",
+        name="Required Sale Service",
+    )
 
     response = client.put(
         f"/municipalities/{municipality.id}/services",
@@ -262,7 +543,113 @@ def test_price_cannot_be_negative(client: TestClient, db_session: Session) -> No
                 {
                     "service_id": service_id,
                     "is_enabled": True,
-                    "unit_price": -1,
+                    "support_price": 100,
+                    "notes": None,
+                }
+            ]
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_negative_sale_price_is_rejected(client: TestClient, db_session: Session) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    municipality = _create_municipality(db_session=db_session)
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="negative-sale",
+        name="Negative Sale",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="negative-sale-service",
+        name="Negative Sale Service",
+    )
+
+    response = client.put(
+        f"/municipalities/{municipality.id}/services",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "service_id": service_id,
+                    "is_enabled": True,
+                    "sale_price": -1,
+                    "support_price": 100,
+                    "notes": None,
+                }
+            ]
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_null_support_price_is_accepted(client: TestClient, db_session: Session) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    municipality = _create_municipality(db_session=db_session)
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="nullable-support",
+        name="Nullable Support",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="nullable-support-service",
+        name="Nullable Support Service",
+    )
+
+    response = client.put(
+        f"/municipalities/{municipality.id}/services",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "service_id": service_id,
+                    "is_enabled": True,
+                    "sale_price": 2500,
+                    "support_price": None,
+                    "notes": None,
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()[0]["support_price"] is None
+
+
+def test_negative_support_price_is_rejected(client: TestClient, db_session: Session) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    municipality = _create_municipality(db_session=db_session)
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="negative-support",
+        name="Negative Support",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="negative-support-service",
+        name="Negative Support Service",
+    )
+
+    response = client.put(
+        f"/municipalities/{municipality.id}/services",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "service_id": service_id,
+                    "is_enabled": True,
+                    "sale_price": 2500,
+                    "support_price": -10,
                     "notes": None,
                 }
             ]
@@ -274,7 +661,19 @@ def test_price_cannot_be_negative(client: TestClient, db_session: Session) -> No
 def test_patch_single_municipality_service_config(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
     municipality = _create_municipality(db_session=db_session)
-    service_id = _create_service(client=client, headers=headers, name="Patchable")
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="patchable-group",
+        name="Patchable Group",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="patchable-service",
+        name="Patchable Service",
+    )
 
     create_response = client.put(
         f"/municipalities/{municipality.id}/services",
@@ -284,7 +683,8 @@ def test_patch_single_municipality_service_config(client: TestClient, db_session
                 {
                     "service_id": service_id,
                     "is_enabled": True,
-                    "unit_price": 1000,
+                    "sale_price": 1000,
+                    "support_price": 200,
                     "notes": "v1",
                 }
             ]
@@ -298,28 +698,62 @@ def test_patch_single_municipality_service_config(client: TestClient, db_session
         headers=headers,
         json={
             "is_enabled": False,
-            "unit_price": 2500,
+            "sale_price": 2500,
+            "support_price": None,
             "notes": "v2",
         },
     )
     assert patch_response.status_code == 200
     patch_data = patch_response.json()
     assert patch_data["is_enabled"] is False
-    assert patch_data["unit_price"] == 2500
+    assert patch_data["sale_price"] == 2500
+    assert patch_data["support_price"] is None
     assert patch_data["notes"] == "v2"
 
 
-def test_pricing_summary_returns_correct_totals_and_ignores_disabled(
+def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
     client: TestClient,
     db_session: Session,
 ) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
     municipality = _create_municipality(db_session=db_session)
 
-    service_monthly = _create_service(client=client, headers=headers, name="Monthly")
-    service_yearly = _create_service(client=client, headers=headers, name="Yearly")
-    service_one_time = _create_service(client=client, headers=headers, name="One Time")
-    service_disabled = _create_service(client=client, headers=headers, name="Disabled")
+    security_group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="security",
+        name="Security",
+        sort_order=1,
+    )
+    infra_group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="infrastructure",
+        name="Infrastructure",
+        sort_order=2,
+    )
+
+    service_guard = _create_service(
+        client=client,
+        headers=headers,
+        group_id=security_group_id,
+        code="guard",
+        name="Guard",
+    )
+    service_camera = _create_service(
+        client=client,
+        headers=headers,
+        group_id=security_group_id,
+        code="camera",
+        name="Camera",
+    )
+    service_fiber = _create_service(
+        client=client,
+        headers=headers,
+        group_id=infra_group_id,
+        code="fiber",
+        name="Fiber",
+    )
 
     upsert_response = client.put(
         f"/municipalities/{municipality.id}/services",
@@ -327,27 +761,24 @@ def test_pricing_summary_returns_correct_totals_and_ignores_disabled(
         json={
             "items": [
                 {
-                    "service_id": service_monthly,
+                    "service_id": service_guard,
                     "is_enabled": True,
-                    "unit_price": 1000,
+                    "sale_price": 100,
+                    "support_price": 20,
                     "notes": None,
                 },
                 {
-                    "service_id": service_yearly,
-                    "is_enabled": True,
-                    "unit_price": 2000,
-                    "notes": None,
-                },
-                {
-                    "service_id": service_one_time,
-                    "is_enabled": True,
-                    "unit_price": 3000,
-                    "notes": None,
-                },
-                {
-                    "service_id": service_disabled,
+                    "service_id": service_camera,
                     "is_enabled": False,
-                    "unit_price": 999999,
+                    "sale_price": 200,
+                    "support_price": 30,
+                    "notes": None,
+                },
+                {
+                    "service_id": service_fiber,
+                    "is_enabled": True,
+                    "sale_price": 300,
+                    "support_price": None,
                     "notes": None,
                 },
             ]
@@ -361,16 +792,33 @@ def test_pricing_summary_returns_correct_totals_and_ignores_disabled(
     )
     assert summary_response.status_code == 200
     summary_data = summary_response.json()
-    assert summary_data["totals"]["enabled_total"] == 6000
-    assert summary_data["totals"]["configured_total"] == 1005999
 
-    disabled_items = [item for item in summary_data["items"] if item["service_name"] == "Disabled"]
-    assert len(disabled_items) == 1
-    assert disabled_items[0]["is_enabled"] is False
-    assert disabled_items[0]["line_total"] == 0
+    assert summary_data["totals"]["sale_total"] == 400
+    assert summary_data["totals"]["support_total"] == 20
+    assert summary_data["totals"]["grand_total"] == 420
+
+    groups = summary_data["groups"]
+    assert len(groups) == 2
+    group_map = {item["group_code"]: item for item in groups}
+
+    assert group_map["security"]["totals"]["sale_total"] == 100
+    assert group_map["security"]["totals"]["support_total"] == 20
+    assert group_map["security"]["totals"]["grand_total"] == 120
+    assert group_map["infrastructure"]["totals"]["sale_total"] == 300
+    assert group_map["infrastructure"]["totals"]["support_total"] == 0
+    assert group_map["infrastructure"]["totals"]["grand_total"] == 300
+
+    security_items = {item["service_code"]: item for item in group_map["security"]["items"]}
+    assert security_items["camera"]["line_sale_total"] == 0
+    assert security_items["camera"]["line_support_total"] == 0
+    assert security_items["camera"]["line_grand_total"] == 0
+
+    infra_items = {item["service_code"]: item for item in group_map["infrastructure"]["items"]}
+    assert infra_items["fiber"]["support_price"] is None
+    assert infra_items["fiber"]["line_support_total"] == 0
 
 
-def test_admin_only_access_enforced_and_customer_denied(
+def test_admin_only_access_enforced_and_customer_access_denied(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -379,8 +827,9 @@ def test_admin_only_access_enforced_and_customer_denied(
     customer_token = _login(client=client, mobile=customer.mobile)
 
     unauthorized_response = client.post(
-        "/services",
+        "/service-groups",
         json={
+            "code": "unauthorized",
             "name": "Unauthorized",
             "description": None,
             "sort_order": 1,
@@ -389,9 +838,10 @@ def test_admin_only_access_enforced_and_customer_denied(
     assert unauthorized_response.status_code == 401
 
     customer_response = client.post(
-        "/services",
+        "/service-groups",
         headers={"Authorization": f"Bearer {customer_token}"},
         json={
+            "code": "denied",
             "name": "Denied",
             "description": None,
             "sort_order": 1,
