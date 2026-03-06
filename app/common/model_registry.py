@@ -1,0 +1,9 @@
+from app.modules.auth import schemas as auth_schemas
+from app.modules.municipalities import schemas as municipalities_schemas
+from app.modules.users import schemas as users_schemas
+
+MODEL_MODULES = (
+    auth_schemas,
+    municipalities_schemas,
+    users_schemas,
+)
