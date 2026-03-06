@@ -6,6 +6,8 @@ Phase 1 includes:
 - JWT access authentication
 - Municipality management
 - Assign users to municipalities
+- Service catalog management
+- Municipality-specific service pricing
 
 Refresh token is not implemented in this phase to keep authentication flow minimal and focused on access-token based APIs.
 
@@ -54,9 +56,9 @@ tests/
 ## Setup
 
 ```bash
-cp .env.example .env
+cp .env.example .env | copy /Y .env.example .env
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate | .venv\Scripts\activate
 pip install -e .[dev]
 ```
 
@@ -99,6 +101,21 @@ pytest
 - `GET /users/{id}`
 - `PATCH /users/{id}`
 - `DELETE /users/{id}`
+- `POST /services`
+- `GET /services`
+- `GET /services/{id}`
+- `PATCH /services/{id}`
+- `DELETE /services/{id}`
+- `GET /municipalities/{municipality_id}/services`
+- `PUT /municipalities/{municipality_id}/services`
+- `PATCH /municipality-service-configs/{id}`
+- `GET /municipalities/{municipality_id}/pricing-summary`
+
+Bulk upsert behavior for `PUT /municipalities/{municipality_id}/services`:
+- Upserts provided `service_id` rows
+- Creates missing rows
+- Updates existing rows
+- Items omitted from request remain unchanged
 
 ## Sample Requests
 

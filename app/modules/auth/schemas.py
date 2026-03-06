@@ -14,7 +14,11 @@ class OTPCode(Base):
     mobile: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     code: Mapped[str] = mapped_column(String(20), nullable=False)
     purpose: Mapped[OtpPurpose] = mapped_column(
-        Enum(OtpPurpose, name="otp_purpose"),
+        Enum(
+            OtpPurpose,
+            name="otp_purpose",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
         nullable=False,
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

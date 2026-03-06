@@ -31,3 +31,31 @@ class CurrentUser(MongoDTO):
         examples=[10],
     )
     is_active: bool = Field(..., description="Current user active status.", examples=[True])
+
+
+class HomePageOut(MongoDTO):
+    message: str = Field(
+        ...,
+        description="Welcome message for API root.",
+        examples=["Welcome to Zaraamad Portal API"],
+    )
+    app_name: str = Field(
+        ...,
+        description="Application name.",
+        examples=["Zaraamad Portal API"],
+    )
+    version: str = Field(
+        ...,
+        description="Application version.",
+        examples=["1.0.0"],
+    )
+    docs_url: str = Field(
+        ...,
+        description="Swagger documentation URL.",
+        examples=["/docs"],
+    )
+    redoc_url: str = Field(
+        ...,
+        description="ReDoc documentation URL.",
+        examples=["/redoc"],
+    )

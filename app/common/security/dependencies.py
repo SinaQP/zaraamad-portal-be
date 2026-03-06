@@ -1,5 +1,5 @@
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -8,7 +8,10 @@ from app.common.dtos import CurrentUser
 from app.common.enums import UserRole
 from app.common.security.jwt_service import JWTService, get_jwt_service
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/verify-otp")
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    description="Enter the JWT access token from /auth/verify-otp.",
+)
 
 
 class CurrentUserResolver:
@@ -76,10 +79,16 @@ def get_current_user_resolver(
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db_session: Session = Depends(get_db_session),
     resolver: CurrentUserResolver = Depends(get_current_user_resolver),
 ) -> CurrentUser:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token.",
+        )
+    token = credentials.credentials
     return resolver.resolve(token=token, db_session=db_session)
 
 

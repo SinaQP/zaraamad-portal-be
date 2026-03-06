@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.common import model_registry as _model_registry
 from app.common.config import Settings
 from app.common.enums import UserRole
 from app.common.validators.mobile_validator import get_mobile_validator

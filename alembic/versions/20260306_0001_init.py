@@ -9,6 +9,7 @@ from collections.abc import Sequence
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 revision: str = "20260306_0001"
 down_revision: str | None = None
@@ -17,8 +18,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    user_role_enum = sa.Enum("admin", "customer", name="user_role")
-    otp_purpose_enum = sa.Enum("login", name="otp_purpose")
+    user_role_enum = postgresql.ENUM("admin", "customer", name="user_role", create_type=True)
+    otp_purpose_enum = postgresql.ENUM("login", name="otp_purpose", create_type=True)
     user_role_enum.create(op.get_bind(), checkfirst=True)
     otp_purpose_enum.create(op.get_bind(), checkfirst=True)
 
@@ -47,7 +48,11 @@ def upgrade() -> None:
         sa.Column("full_name", sa.String(length=255), nullable=False),
         sa.Column("mobile", sa.String(length=20), nullable=False),
         sa.Column("email", sa.String(length=255), nullable=True),
-        sa.Column("role", user_role_enum, nullable=False),
+        sa.Column(
+            "role",
+            postgresql.ENUM("admin", "customer", name="user_role", create_type=False),
+            nullable=False,
+        ),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column(
             "municipality_id",
@@ -71,7 +76,11 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("mobile", sa.String(length=20), nullable=False),
         sa.Column("code", sa.String(length=20), nullable=False),
-        sa.Column("purpose", otp_purpose_enum, nullable=False),
+        sa.Column(
+            "purpose",
+            postgresql.ENUM("login", name="otp_purpose", create_type=False),
+            nullable=False,
+        ),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("is_used", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
@@ -87,7 +96,7 @@ def downgrade() -> None:
     op.drop_index("ix_municipalities_code", table_name="municipalities")
     op.drop_table("municipalities")
 
-    otp_purpose_enum = sa.Enum("login", name="otp_purpose")
-    user_role_enum = sa.Enum("admin", "customer", name="user_role")
+    otp_purpose_enum = postgresql.ENUM("login", name="otp_purpose", create_type=True)
+    user_role_enum = postgresql.ENUM("admin", "customer", name="user_role", create_type=True)
     otp_purpose_enum.drop(op.get_bind(), checkfirst=True)
     user_role_enum.drop(op.get_bind(), checkfirst=True)
