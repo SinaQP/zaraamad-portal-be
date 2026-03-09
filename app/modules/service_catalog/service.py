@@ -32,7 +32,7 @@ class MunicipalityLookupService:
             select(
                 municipality_table.c.id,
                 municipality_table.c.name,
-                municipality_table.c.code,
+                municipality_table.c.grade,
             ).where(municipality_table.c.id == municipality_id)
         ).mappings().first()
         if municipality_row is None:
@@ -43,7 +43,7 @@ class MunicipalityLookupService:
         return {
             "id": municipality_row["id"],
             "name": municipality_row["name"],
-            "code": municipality_row["code"],
+            "grade": municipality_row["grade"],
         }
 
 
@@ -450,7 +450,7 @@ class MunicipalityPricingSummaryService:
             municipality=MunicipalityPricingSummaryMunicipality(
                 id=int(municipality["id"]),
                 name=str(municipality["name"]),
-                code=str(municipality["code"]),
+                grade=int(municipality["grade"]),
             ),
             groups=groups,
             totals=MunicipalityPricingSummaryTotals(

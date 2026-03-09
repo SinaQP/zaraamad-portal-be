@@ -7,9 +7,7 @@ class MunicipalityMapper:
         return MunicipalityOut(
             id=municipality.id,
             name=municipality.name,
-            code=municipality.code,
-            province=municipality.province,
-            city=municipality.city,
+            grade=municipality.grade,
             is_active=municipality.is_active,
             created_at=municipality.created_at,
             updated_at=municipality.updated_at,

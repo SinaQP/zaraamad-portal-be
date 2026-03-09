@@ -121,7 +121,6 @@ class AuthService:
                 user_table.c.id,
                 user_table.c.full_name,
                 user_table.c.mobile,
-                user_table.c.email,
                 user_table.c.role,
                 user_table.c.municipality_id,
                 user_table.c.is_active,

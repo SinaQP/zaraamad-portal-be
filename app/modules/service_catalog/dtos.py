@@ -129,7 +129,7 @@ class MunicipalityServiceConfigBulkUpsertCreate(MunicipalityServiceConfigBulkUps
 class MunicipalityPricingSummaryMunicipality(MongoDTO):
     id: int = Field(..., description="Municipality id.", examples=[1])
     name: str = Field(..., description="Municipality name.", examples=["Tehran Municipality"])
-    code: str = Field(..., description="Municipality code.", examples=["THR-001"])
+    grade: int = Field(..., description="Municipality grade.", examples=[1])
 
 
 class MunicipalityPricingSummaryItem(MongoDTO):

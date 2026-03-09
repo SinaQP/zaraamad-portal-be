@@ -24,9 +24,7 @@ class MunicipalityService:
     def create(self, dto: MunicipalityCreate) -> Municipality:
         municipality = Municipality(
             name=dto.name,
-            code=dto.code,
-            province=dto.province,
-            city=dto.city,
+            grade=dto.grade,
             is_active=True,
         )
         self._db_session.add(municipality)
@@ -36,7 +34,7 @@ class MunicipalityService:
             self._db_session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Municipality code already exists.",
+                detail="Data integrity error.",
             ) from exc
         self._db_session.refresh(municipality)
         return municipality
@@ -65,7 +63,7 @@ class MunicipalityService:
             self._db_session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Municipality code already exists.",
+                detail="Data integrity error.",
             ) from exc
         self._db_session.refresh(municipality)
         return municipality
