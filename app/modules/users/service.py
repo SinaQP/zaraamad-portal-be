@@ -1,28 +1,56 @@
 from fastapi import Depends, HTTPException, status
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.common.database import Base, get_db_session
-from app.common.enums import UserRole
+from app.common.enums import SortOrder, UserRole
+from app.common.pagination import PaginationMeta, PaginationParams
 from app.modules.users.dtos import UserCreate, UserUpdate
 from app.modules.users.schemas import User
 
 
 class UserQueryBuilder:
+    SORT_COLUMNS = {
+        "id": User.id,
+        "full_name": User.full_name,
+        "mobile": User.mobile,
+        "role": User.role,
+        "municipality_id": User.municipality_id,
+        "is_active": User.is_active,
+        "created_at": User.created_at,
+        "updated_at": User.updated_at,
+    }
+
     def build_list_query(
         self,
         role: UserRole | None,
         municipality_id: int | None,
         is_active: bool | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
     ) -> Select[tuple[User]]:
-        query = select(User).order_by(User.id.asc())
+        query = select(User)
         if role is not None:
             query = query.where(User.role == role)
         if municipality_id is not None:
             query = query.where(User.municipality_id == municipality_id)
         if is_active is not None:
             query = query.where(User.is_active.is_(is_active))
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.where(
+                or_(
+                    User.full_name.ilike(search_pattern),
+                    User.mobile.ilike(search_pattern),
+                )
+            )
+        sort_column = self.SORT_COLUMNS[sort_by]
+        if sort_order == SortOrder.DESC:
+            query = query.order_by(sort_column.desc(), User.id.desc())
+        else:
+            query = query.order_by(sort_column.asc(), User.id.asc())
         return query
 
 
@@ -89,13 +117,32 @@ class UserService:
         role: UserRole | None,
         municipality_id: int | None,
         is_active: bool | None,
-    ) -> list[User]:
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+        pagination: PaginationParams,
+    ) -> tuple[list[User], PaginationMeta]:
         query = self._query_builder.build_list_query(
             role=role,
             municipality_id=municipality_id,
             is_active=is_active,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
-        return list(self._db_session.scalars(query).all())
+        total_count = int(
+            self._db_session.scalar(
+                select(func.count()).select_from(query.order_by(None).subquery())
+            ) or 0
+        )
+        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
+        items = list(self._db_session.scalars(paginated_query).all())
+        meta = PaginationMeta(
+            total_count=total_count,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
+        return items, meta
 
     def get_or_404(self, user_id: int) -> User:
         user = self._db_session.get(User, user_id)

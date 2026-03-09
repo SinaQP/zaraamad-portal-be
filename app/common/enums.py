@@ -8,3 +8,8 @@ class UserRole(str, Enum):
 
 class OtpPurpose(str, Enum):
     LOGIN = "login"
+
+
+class SortOrder(str, Enum):
+    ASC = "asc"
+    DESC = "desc"

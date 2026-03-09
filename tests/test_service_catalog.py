@@ -323,6 +323,112 @@ def test_deactivate_service(client: TestClient, db_session: Session) -> None:
     assert response.json()["is_active"] is False
 
 
+def test_service_group_and_service_lists_support_search_sort_and_pagination(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    security_group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="security",
+        name="Security",
+        sort_order=1,
+    )
+    ops_group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="operations",
+        name="Operations",
+        sort_order=2,
+    )
+    _create_service_group(
+        client=client,
+        headers=headers,
+        code="support",
+        name="Support",
+        sort_order=3,
+    )
+
+    group_search = client.get(
+        "/service-groups",
+        headers=headers,
+        params={"search": "oper"},
+    )
+    assert group_search.status_code == 200
+    assert len(group_search.json()) == 1
+    assert group_search.json()[0]["name"] == "Operations"
+    assert group_search.headers["X-Total-Count"] == "1"
+
+    group_paged = client.get(
+        "/service-groups",
+        headers=headers,
+        params={
+            "sort_by": "name",
+            "sort_order": "asc",
+            "page": 1,
+            "page_size": 2,
+        },
+    )
+    assert group_paged.status_code == 200
+    assert len(group_paged.json()) == 2
+    assert group_paged.headers["X-Total-Count"] == "3"
+    assert group_paged.headers["X-Total-Pages"] == "2"
+
+    _create_service(
+        client=client,
+        headers=headers,
+        group_id=security_group_id,
+        code="alpha-service",
+        name="Alpha Service",
+        sort_order=1,
+    )
+    _create_service(
+        client=client,
+        headers=headers,
+        group_id=ops_group_id,
+        code="gamma-service",
+        name="Gamma Service",
+        sort_order=2,
+    )
+    _create_service(
+        client=client,
+        headers=headers,
+        group_id=ops_group_id,
+        code="beta-service",
+        name="Beta Service",
+        sort_order=3,
+    )
+
+    service_search = client.get(
+        "/services",
+        headers=headers,
+        params={"search": "beta"},
+    )
+    assert service_search.status_code == 200
+    assert len(service_search.json()) == 1
+    assert service_search.json()[0]["code"] == "beta-service"
+    assert service_search.headers["X-Total-Count"] == "1"
+
+    service_paged = client.get(
+        "/services",
+        headers=headers,
+        params={
+            "sort_by": "code",
+            "sort_order": "desc",
+            "page": 1,
+            "page_size": 2,
+        },
+    )
+    assert service_paged.status_code == 200
+    service_items = service_paged.json()
+    assert len(service_items) == 2
+    assert service_items[0]["code"] == "gamma-service"
+    assert service_items[1]["code"] == "beta-service"
+    assert service_paged.headers["X-Total-Count"] == "3"
+    assert service_paged.headers["X-Total-Pages"] == "2"
+
+
 def test_create_municipality_service_config_and_list(
     client: TestClient,
     db_session: Session,
@@ -372,6 +478,108 @@ def test_create_municipality_service_config_and_list(
     list_data = list_response.json()
     assert len(list_data) == 1
     assert list_data[0]["group_code"] == "security"
+
+
+def test_municipality_service_list_supports_filter_search_sort_and_pagination(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    municipality = _create_municipality(db_session=db_session)
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="ops",
+        name="Operations",
+        sort_order=1,
+    )
+    service_a = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="guard",
+        name="Guard",
+        sort_order=1,
+    )
+    service_b = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="camera",
+        name="Camera",
+        sort_order=2,
+    )
+    service_c = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="fiber",
+        name="Fiber",
+        sort_order=3,
+    )
+
+    upsert_response = client.put(
+        f"/municipalities/{municipality.id}/services",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "service_id": service_a,
+                    "is_enabled": True,
+                    "sale_price": 1000,
+                    "support_price": 100,
+                    "notes": "guard enabled",
+                },
+                {
+                    "service_id": service_b,
+                    "is_enabled": False,
+                    "sale_price": 2000,
+                    "support_price": 200,
+                    "notes": "camera disabled",
+                },
+                {
+                    "service_id": service_c,
+                    "is_enabled": True,
+                    "sale_price": 3000,
+                    "support_price": None,
+                    "notes": "fiber enabled",
+                },
+            ]
+        },
+    )
+    assert upsert_response.status_code == 200
+
+    filtered_response = client.get(
+        f"/municipalities/{municipality.id}/services",
+        headers=headers,
+        params={
+            "is_enabled": True,
+            "search": "fib",
+        },
+    )
+    assert filtered_response.status_code == 200
+    filtered_items = filtered_response.json()
+    assert len(filtered_items) == 1
+    assert filtered_items[0]["service_code"] == "fiber"
+    assert filtered_response.headers["X-Total-Count"] == "1"
+
+    paged_response = client.get(
+        f"/municipalities/{municipality.id}/services",
+        headers=headers,
+        params={
+            "sort_by": "sale_price",
+            "sort_order": "desc",
+            "page": 1,
+            "page_size": 2,
+        },
+    )
+    assert paged_response.status_code == 200
+    paged_items = paged_response.json()
+    assert len(paged_items) == 2
+    assert paged_items[0]["sale_price"] == 3000
+    assert paged_items[1]["sale_price"] == 2000
+    assert paged_response.headers["X-Total-Count"] == "3"
+    assert paged_response.headers["X-Total-Pages"] == "2"
 
 
 def test_bulk_upsert_municipality_service_configs_omitted_items_remain_unchanged(

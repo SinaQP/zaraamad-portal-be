@@ -1,5 +1,9 @@
-from fastapi import APIRouter, Depends, Query, status
+from typing import Literal
 
+from fastapi import APIRouter, Depends, Query, Response, status
+
+from app.common.enums import SortOrder
+from app.common.pagination import PaginationParams, set_pagination_headers
 from app.common.security.dependencies import require_admin
 from app.modules.municipalities.dtos import (
     MunicipalityCreate,
@@ -45,12 +49,28 @@ def create_municipality(
     },
 )
 def list_municipalities(
+    response: Response,
     is_active: bool | None = Query(default=None, description="Filter by active flag."),
+    search: str | None = Query(default=None, description="Search by municipality name."),
+    sort_by: Literal["id", "name", "grade", "is_active", "created_at", "updated_at"] = Query(
+        default="id",
+        description="Sort field.",
+    ),
+    sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
+    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
+    page_size: int = Query(default=20, ge=1, le=100, description="Page size."),
     _: object = Depends(require_admin),
     service: MunicipalityService = Depends(get_municipality_service),
     mapper: MunicipalityMapper = Depends(get_municipality_mapper),
 ) -> list[MunicipalityOut]:
-    municipalities = service.list(is_active=is_active)
+    municipalities, meta = service.list(
+        is_active=is_active,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        pagination=PaginationParams(page=page, page_size=page_size),
+    )
+    set_pagination_headers(response=response, meta=meta)
     return [mapper.to_out(municipality=item) for item in municipalities]
 
 

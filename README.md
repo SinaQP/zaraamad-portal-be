@@ -117,6 +117,19 @@ pytest
 - `PATCH /municipality-service-configs/{id}`
 - `GET /municipalities/{municipality_id}/pricing-summary`
 
+List API query options (available on list endpoints):
+- `search`: free-text search on relevant fields
+- `sort_by`: field name (endpoint-specific allowed values)
+- `sort_order`: `asc` or `desc`
+- `page`: page number (starts at `1`)
+- `page_size`: page size (`1..100`)
+
+Pagination metadata is returned in response headers:
+- `X-Total-Count`
+- `X-Page`
+- `X-Page-Size`
+- `X-Total-Pages`
+
 Bulk upsert behavior for `PUT /municipalities/{municipality_id}/services`:
 - Upserts provided `service_id` rows
 - Creates missing rows

@@ -1,9 +1,11 @@
 from fastapi import Depends, HTTPException, status
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.common.database import Base, get_db_session
+from app.common.enums import SortOrder
+from app.common.pagination import PaginationMeta, PaginationParams
 from app.modules.service_catalog.dtos import (
     MunicipalityPricingSummaryGroup,
     MunicipalityPricingSummaryGroupTotals,
@@ -48,28 +50,85 @@ class MunicipalityLookupService:
 
 
 class ServiceGroupQueryBuilder:
-    def build_list_query(self, is_active: bool | None) -> Select[tuple[ServiceGroup]]:
-        query = select(ServiceGroup).order_by(ServiceGroup.sort_order.asc(), ServiceGroup.id.asc())
+    SORT_COLUMNS = {
+        "id": ServiceGroup.id,
+        "code": ServiceGroup.code,
+        "name": ServiceGroup.name,
+        "sort_order": ServiceGroup.sort_order,
+        "is_active": ServiceGroup.is_active,
+        "created_at": ServiceGroup.created_at,
+        "updated_at": ServiceGroup.updated_at,
+    }
+
+    def build_list_query(
+        self,
+        is_active: bool | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+    ) -> Select[tuple[ServiceGroup]]:
+        query = select(ServiceGroup)
         if is_active is not None:
             query = query.where(ServiceGroup.is_active.is_(is_active))
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.where(
+                or_(
+                    ServiceGroup.code.ilike(search_pattern),
+                    ServiceGroup.name.ilike(search_pattern),
+                    ServiceGroup.description.ilike(search_pattern),
+                )
+            )
+        sort_column = self.SORT_COLUMNS[sort_by]
+        if sort_order == SortOrder.DESC:
+            query = query.order_by(sort_column.desc(), ServiceGroup.id.desc())
+        else:
+            query = query.order_by(sort_column.asc(), ServiceGroup.id.asc())
         return query
 
 
 class ServiceQueryBuilder:
+    SORT_COLUMNS = {
+        "id": Service.id,
+        "group_id": Service.group_id,
+        "group_sort_order": ServiceGroup.sort_order,
+        "code": Service.code,
+        "name": Service.name,
+        "sort_order": Service.sort_order,
+        "is_active": Service.is_active,
+        "created_at": Service.created_at,
+        "updated_at": Service.updated_at,
+    }
+
     def build_list_query(
         self,
         group_id: int | None,
         is_active: bool | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
     ) -> Select[tuple[Service, ServiceGroup]]:
-        query = (
-            select(Service, ServiceGroup)
-            .join(ServiceGroup, ServiceGroup.id == Service.group_id)
-            .order_by(ServiceGroup.sort_order.asc(), Service.sort_order.asc(), Service.id.asc())
-        )
+        query = select(Service, ServiceGroup).join(ServiceGroup, ServiceGroup.id == Service.group_id)
         if group_id is not None:
             query = query.where(Service.group_id == group_id)
         if is_active is not None:
             query = query.where(Service.is_active.is_(is_active))
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.where(
+                or_(
+                    Service.code.ilike(search_pattern),
+                    Service.name.ilike(search_pattern),
+                    Service.description.ilike(search_pattern),
+                    ServiceGroup.code.ilike(search_pattern),
+                    ServiceGroup.name.ilike(search_pattern),
+                )
+            )
+        sort_column = self.SORT_COLUMNS[sort_by]
+        if sort_order == SortOrder.DESC:
+            query = query.order_by(sort_column.desc(), Service.id.desc())
+        else:
+            query = query.order_by(sort_column.asc(), Service.id.asc())
         return query
 
 
@@ -91,9 +150,33 @@ class ServiceGroupService:
         self._db_session.refresh(group)
         return group
 
-    def list(self, is_active: bool | None) -> list[ServiceGroup]:
-        query = self._query_builder.build_list_query(is_active=is_active)
-        return list(self._db_session.scalars(query).all())
+    def list(
+        self,
+        is_active: bool | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+        pagination: PaginationParams,
+    ) -> tuple[list[ServiceGroup], PaginationMeta]:
+        query = self._query_builder.build_list_query(
+            is_active=is_active,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total_count = int(
+            self._db_session.scalar(
+                select(func.count()).select_from(query.order_by(None).subquery())
+            ) or 0
+        )
+        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
+        items = list(self._db_session.scalars(paginated_query).all())
+        meta = PaginationMeta(
+            total_count=total_count,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
+        return items, meta
 
     def get_or_404(self, group_id: int) -> ServiceGroup:
         group = self._db_session.get(ServiceGroup, group_id)
@@ -155,10 +238,32 @@ class ServiceCatalogService:
         self,
         group_id: int | None,
         is_active: bool | None,
-    ) -> list[tuple[Service, ServiceGroup]]:
-        query = self._query_builder.build_list_query(group_id=group_id, is_active=is_active)
-        rows = self._db_session.execute(query).all()
-        return [(row[0], row[1]) for row in rows]
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+        pagination: PaginationParams,
+    ) -> tuple[list[tuple[Service, ServiceGroup]], PaginationMeta]:
+        query = self._query_builder.build_list_query(
+            group_id=group_id,
+            is_active=is_active,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total_count = int(
+            self._db_session.scalar(
+                select(func.count()).select_from(query.order_by(None).subquery())
+            ) or 0
+        )
+        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
+        rows = self._db_session.execute(paginated_query).all()
+        items = [(row[0], row[1]) for row in rows]
+        meta = PaginationMeta(
+            total_count=total_count,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
+        return items, meta
 
     def get_or_404(self, service_id: int) -> tuple[Service, ServiceGroup]:
         row = self._db_session.execute(
@@ -217,6 +322,68 @@ class ServiceCatalogService:
             ) from exc
 
 
+class MunicipalityServiceConfigQueryBuilder:
+    SORT_COLUMNS = {
+        "id": MunicipalityServiceConfig.id,
+        "service_id": Service.id,
+        "service_code": Service.code,
+        "service_name": Service.name,
+        "group_code": ServiceGroup.code,
+        "group_name": ServiceGroup.name,
+        "group_sort_order": ServiceGroup.sort_order,
+        "service_sort_order": Service.sort_order,
+        "is_enabled": MunicipalityServiceConfig.is_enabled,
+        "sale_price": MunicipalityServiceConfig.sale_price,
+        "support_price": MunicipalityServiceConfig.support_price,
+        "created_at": MunicipalityServiceConfig.created_at,
+        "updated_at": MunicipalityServiceConfig.updated_at,
+    }
+
+    def build_list_query(
+        self,
+        municipality_id: int,
+        is_enabled: bool | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+    ) -> Select[tuple[MunicipalityServiceConfig, Service, ServiceGroup]]:
+        query = (
+            select(MunicipalityServiceConfig, Service, ServiceGroup)
+            .join(Service, Service.id == MunicipalityServiceConfig.service_id)
+            .join(ServiceGroup, ServiceGroup.id == Service.group_id)
+            .where(MunicipalityServiceConfig.municipality_id == municipality_id)
+        )
+        if is_enabled is not None:
+            query = query.where(MunicipalityServiceConfig.is_enabled.is_(is_enabled))
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.where(
+                or_(
+                    Service.code.ilike(search_pattern),
+                    Service.name.ilike(search_pattern),
+                    ServiceGroup.code.ilike(search_pattern),
+                    ServiceGroup.name.ilike(search_pattern),
+                    MunicipalityServiceConfig.notes.ilike(search_pattern),
+                )
+            )
+        sort_column = self.SORT_COLUMNS[sort_by]
+        if sort_order == SortOrder.DESC:
+            query = query.order_by(
+                sort_column.desc(),
+                ServiceGroup.sort_order.desc(),
+                Service.sort_order.desc(),
+                Service.id.desc(),
+            )
+        else:
+            query = query.order_by(
+                sort_column.asc(),
+                ServiceGroup.sort_order.asc(),
+                Service.sort_order.asc(),
+                Service.id.asc(),
+            )
+        return query
+
+
 class MunicipalityServiceConfigPolicy:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
@@ -270,13 +437,39 @@ class MunicipalityServiceConfigService:
         self._db_session = db_session
         self._municipality_lookup_service = MunicipalityLookupService(db_session=db_session)
         self._policy = MunicipalityServiceConfigPolicy(db_session=db_session)
+        self._query_builder = MunicipalityServiceConfigQueryBuilder()
 
     def list_by_municipality(
         self,
         municipality_id: int,
-    ) -> list[tuple[MunicipalityServiceConfig, Service, ServiceGroup]]:
+        is_enabled: bool | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+        pagination: PaginationParams,
+    ) -> tuple[list[tuple[MunicipalityServiceConfig, Service, ServiceGroup]], PaginationMeta]:
         self._municipality_lookup_service.get_or_404(municipality_id=municipality_id)
-        return self._list_joined_configs(municipality_id=municipality_id)
+        query = self._query_builder.build_list_query(
+            municipality_id=municipality_id,
+            is_enabled=is_enabled,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total_count = int(
+            self._db_session.scalar(
+                select(func.count()).select_from(query.order_by(None).subquery())
+            ) or 0
+        )
+        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
+        rows = self._db_session.execute(paginated_query).all()
+        items = [(row[0], row[1], row[2]) for row in rows]
+        meta = PaginationMeta(
+            total_count=total_count,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
+        return items, meta
 
     def bulk_upsert(
         self,
@@ -355,11 +548,13 @@ class MunicipalityServiceConfigService:
         municipality_id: int,
     ) -> list[tuple[MunicipalityServiceConfig, Service, ServiceGroup]]:
         rows = self._db_session.execute(
-            select(MunicipalityServiceConfig, Service, ServiceGroup)
-            .join(Service, Service.id == MunicipalityServiceConfig.service_id)
-            .join(ServiceGroup, ServiceGroup.id == Service.group_id)
-            .where(MunicipalityServiceConfig.municipality_id == municipality_id)
-            .order_by(ServiceGroup.sort_order.asc(), Service.sort_order.asc(), Service.id.asc())
+            self._query_builder.build_list_query(
+                municipality_id=municipality_id,
+                is_enabled=None,
+                search=None,
+                sort_by="group_sort_order",
+                sort_order=SortOrder.ASC,
+            )
         ).all()
         return [(row[0], row[1], row[2]) for row in rows]
 

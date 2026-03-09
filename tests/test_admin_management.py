@@ -136,6 +136,124 @@ def test_admin_can_create_admin_without_municipality(
     assert response.json()["municipality_id"] is None
 
 
+def test_users_list_supports_search_sort_and_pagination(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin = _create_admin(db_session=db_session)
+    admin_token = _login(client=client, mobile=admin.mobile)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    municipality_response = client.post(
+        "/municipalities",
+        headers=admin_headers,
+        json={"name": "Search Municipality", "grade": 2},
+    )
+    assert municipality_response.status_code == 201
+    municipality_id = municipality_response.json()["id"]
+
+    create_payloads = [
+        {
+            "full_name": "Alpha Customer",
+            "mobile": "09121110001",
+            "role": UserRole.CUSTOMER.value,
+            "municipality_id": municipality_id,
+        },
+        {
+            "full_name": "Gamma Customer",
+            "mobile": "09121110002",
+            "role": UserRole.CUSTOMER.value,
+            "municipality_id": municipality_id,
+        },
+        {
+            "full_name": "Beta Admin",
+            "mobile": "09121110003",
+            "role": UserRole.ADMIN.value,
+        },
+    ]
+    for payload in create_payloads:
+        response = client.post("/users", headers=admin_headers, json=payload)
+        assert response.status_code == 201
+
+    search_response = client.get(
+        "/users",
+        headers=admin_headers,
+        params={"search": "alpha"},
+    )
+    assert search_response.status_code == 200
+    search_items = search_response.json()
+    assert len(search_items) == 1
+    assert search_items[0]["full_name"] == "Alpha Customer"
+    assert search_response.headers["X-Total-Count"] == "1"
+
+    paged_response = client.get(
+        "/users",
+        headers=admin_headers,
+        params={
+            "sort_by": "full_name",
+            "sort_order": "asc",
+            "page": 1,
+            "page_size": 2,
+        },
+    )
+    assert paged_response.status_code == 200
+    paged_items = paged_response.json()
+    assert len(paged_items) == 2
+    assert paged_items[0]["full_name"] == "Alpha Customer"
+    assert paged_items[1]["full_name"] == "Beta Admin"
+    assert paged_response.headers["X-Total-Count"] == "4"
+    assert paged_response.headers["X-Page"] == "1"
+    assert paged_response.headers["X-Page-Size"] == "2"
+    assert paged_response.headers["X-Total-Pages"] == "2"
+
+
+def test_municipalities_list_supports_search_sort_and_pagination(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin = _create_admin(db_session=db_session)
+    admin_token = _login(client=client, mobile=admin.mobile)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    for payload in [
+        {"name": "Alpha Municipality", "grade": 1},
+        {"name": "Gamma Municipality", "grade": 3},
+        {"name": "Beta Municipality", "grade": 2},
+    ]:
+        response = client.post("/municipalities", headers=admin_headers, json=payload)
+        assert response.status_code == 201
+
+    search_response = client.get(
+        "/municipalities",
+        headers=admin_headers,
+        params={"search": "beta"},
+    )
+    assert search_response.status_code == 200
+    search_items = search_response.json()
+    assert len(search_items) == 1
+    assert search_items[0]["name"] == "Beta Municipality"
+    assert search_response.headers["X-Total-Count"] == "1"
+
+    paged_response = client.get(
+        "/municipalities",
+        headers=admin_headers,
+        params={
+            "sort_by": "grade",
+            "sort_order": "desc",
+            "page": 2,
+            "page_size": 2,
+        },
+    )
+    assert paged_response.status_code == 200
+    paged_items = paged_response.json()
+    assert len(paged_items) == 1
+    assert paged_items[0]["grade"] == 1
+    assert paged_response.headers["X-Total-Count"] == "3"
+    assert paged_response.headers["X-Page"] == "2"
+    assert paged_response.headers["X-Page-Size"] == "2"
+    assert paged_response.headers["X-Total-Pages"] == "2"
+
+
 def test_customer_cannot_access_admin_endpoints(client: TestClient, db_session: Session) -> None:
     municipality = Municipality(
         name="Qom Municipality",
