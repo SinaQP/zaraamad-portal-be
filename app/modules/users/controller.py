@@ -1,6 +1,10 @@
-from fastapi import APIRouter, Depends, Query, status
+from typing import Literal
+
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.common.enums import UserRole
+from app.common.enums import SortOrder
+from app.common.pagination import PaginationParams, set_pagination_headers
 from app.common.security.dependencies import require_admin
 from app.modules.users.dtos import UserCreate, UserOut, UserUpdate
 from app.modules.users.mappers import UserMapper, get_user_mapper
@@ -43,14 +47,38 @@ def create_user(
     },
 )
 def list_users(
+    response: Response,
     role: UserRole | None = Query(default=None, description="Filter by role."),
     municipality_id: int | None = Query(default=None, description="Filter by municipality id."),
     is_active: bool | None = Query(default=None, description="Filter by active flag."),
+    search: str | None = Query(default=None, description="Search by user full name or mobile."),
+    sort_by: Literal[
+        "id",
+        "full_name",
+        "mobile",
+        "role",
+        "municipality_id",
+        "is_active",
+        "created_at",
+        "updated_at",
+    ] = Query(default="id", description="Sort field."),
+    sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
+    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
+    page_size: int = Query(default=20, ge=1, le=100, description="Page size."),
     _: object = Depends(require_admin),
     service: UserService = Depends(get_user_service),
     mapper: UserMapper = Depends(get_user_mapper),
 ) -> list[UserOut]:
-    users = service.list(role=role, municipality_id=municipality_id, is_active=is_active)
+    users, meta = service.list(
+        role=role,
+        municipality_id=municipality_id,
+        is_active=is_active,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        pagination=PaginationParams(page=page, page_size=page_size),
+    )
+    set_pagination_headers(response=response, meta=meta)
     return [mapper.to_out(user=item) for item in users]
 
 

@@ -1,5 +1,9 @@
-from fastapi import APIRouter, Depends, Query, status
+from typing import Literal
 
+from fastapi import APIRouter, Depends, Query, Response, status
+
+from app.common.enums import SortOrder
+from app.common.pagination import PaginationParams, set_pagination_headers
 from app.common.security.dependencies import require_admin
 from app.modules.service_catalog.dtos import (
     MunicipalityPricingSummaryResult,
@@ -61,12 +65,28 @@ def create_service_group(
     },
 )
 def list_service_groups(
+    response: Response,
     is_active: bool | None = Query(default=None, description="Filter by active flag."),
+    search: str | None = Query(default=None, description="Search by group code, name, or description."),
+    sort_by: Literal["id", "code", "name", "sort_order", "is_active", "created_at", "updated_at"] = Query(
+        default="sort_order",
+        description="Sort field.",
+    ),
+    sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
+    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
+    page_size: int = Query(default=20, ge=1, le=100, description="Page size."),
     _: object = Depends(require_admin),
     service: ServiceGroupService = Depends(get_service_group_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> list[ServiceGroupOut]:
-    groups = service.list(is_active=is_active)
+    groups, meta = service.list(
+        is_active=is_active,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        pagination=PaginationParams(page=page, page_size=page_size),
+    )
+    set_pagination_headers(response=response, meta=meta)
     return [mapper.to_service_group_out(group=item) for item in groups]
 
 
@@ -168,13 +188,37 @@ def create_service(
     },
 )
 def list_services(
+    response: Response,
     group_id: int | None = Query(default=None, description="Filter by service group id."),
     is_active: bool | None = Query(default=None, description="Filter by active flag."),
+    search: str | None = Query(default=None, description="Search by service/group code, name, or description."),
+    sort_by: Literal[
+        "id",
+        "group_id",
+        "group_sort_order",
+        "code",
+        "name",
+        "sort_order",
+        "is_active",
+        "created_at",
+        "updated_at",
+    ] = Query(default="group_sort_order", description="Sort field."),
+    sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
+    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
+    page_size: int = Query(default=20, ge=1, le=100, description="Page size."),
     _: object = Depends(require_admin),
     service: ServiceCatalogService = Depends(get_service_catalog_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> list[ServiceOut]:
-    services = service.list(group_id=group_id, is_active=is_active)
+    services, meta = service.list(
+        group_id=group_id,
+        is_active=is_active,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        pagination=PaginationParams(page=page, page_size=page_size),
+    )
+    set_pagination_headers(response=response, meta=meta)
     return [mapper.to_service_out(service=item, group=group) for item, group in services]
 
 
@@ -255,12 +299,41 @@ def deactivate_service(
     },
 )
 def list_municipality_services(
+    response: Response,
     municipality_id: int,
+    is_enabled: bool | None = Query(default=None, description="Filter by enabled state."),
+    search: str | None = Query(default=None, description="Search by service/group code, name, or notes."),
+    sort_by: Literal[
+        "id",
+        "service_id",
+        "service_code",
+        "service_name",
+        "group_code",
+        "group_name",
+        "group_sort_order",
+        "service_sort_order",
+        "is_enabled",
+        "sale_price",
+        "support_price",
+        "created_at",
+        "updated_at",
+    ] = Query(default="group_sort_order", description="Sort field."),
+    sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
+    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
+    page_size: int = Query(default=20, ge=1, le=100, description="Page size."),
     _: object = Depends(require_admin),
     service: MunicipalityServiceConfigService = Depends(get_municipality_service_config_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> list[MunicipalityServiceConfigOut]:
-    rows = service.list_by_municipality(municipality_id=municipality_id)
+    rows, meta = service.list_by_municipality(
+        municipality_id=municipality_id,
+        is_enabled=is_enabled,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        pagination=PaginationParams(page=page, page_size=page_size),
+    )
+    set_pagination_headers(response=response, meta=meta)
     return [
         mapper.to_municipality_config_out(config=config, service=service_item, group=group)
         for config, service_item, group in rows
