@@ -7,17 +7,7 @@ from app.common.dtos import MongoDTO, WithId
 
 class MunicipalityBase(MongoDTO):
     name: str = Field(..., description="Municipality name.", examples=["Tehran Municipality"])
-    code: str = Field(..., description="Unique municipality code.", examples=["THR-001"])
-    province: str | None = Field(
-        default=None,
-        description="Province name.",
-        examples=["Tehran"],
-    )
-    city: str | None = Field(
-        default=None,
-        description="City name.",
-        examples=["Tehran"],
-    )
+    grade: int = Field(..., description="Municipality grade.", examples=[1])
 
 
 class MunicipalityCreate(MunicipalityBase):
@@ -32,9 +22,7 @@ class MunicipalityOut(WithId, MunicipalityBase):
 
 class MunicipalityUpdate(MongoDTO):
     name: str | None = Field(default=None, description="Municipality name.", examples=["Qom Municipality"])
-    code: str | None = Field(default=None, description="Municipality code.", examples=["QOM-001"])
-    province: str | None = Field(default=None, description="Province name.", examples=["Qom"])
-    city: str | None = Field(default=None, description="City name.", examples=["Qom"])
+    grade: int | None = Field(default=None, description="Municipality grade.", examples=[2])
     is_active: bool | None = Field(
         default=None,
         description="Municipality active status.",

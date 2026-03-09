@@ -44,7 +44,6 @@ class OtpVerifyCreate(OtpVerifyBase):
 class AuthUserBase(MongoDTO):
     full_name: str = Field(..., description="User full name.", examples=["Ali Rezaei"])
     mobile: str = Field(..., description="Iranian mobile number.", examples=["09121234567"])
-    email: str | None = Field(default=None, description="User email address.", examples=["ali@example.com"])
     role: UserRole = Field(..., description="User role.", examples=[UserRole.ADMIN])
     municipality_id: int | None = Field(
         default=None,

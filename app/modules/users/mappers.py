@@ -8,7 +8,6 @@ class UserMapper:
             id=user.id,
             full_name=user.full_name,
             mobile=user.mobile,
-            email=user.email,
             role=user.role,
             municipality_id=user.municipality_id,
             is_active=user.is_active,

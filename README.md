@@ -127,6 +127,10 @@ Pricing fields for municipality service config:
 - `sale_price` is required
 - `support_price` is optional (`null` is valid)
 
+User role and municipality rule:
+- `admin` users do not require `municipality_id` (it is stored as `null`)
+- `customer` users must provide `municipality_id`
+
 Catalog code behavior:
 - `service_groups.code` can be duplicated
 - `services.code` can be duplicated
@@ -168,7 +172,6 @@ Response:
     "id": 1,
     "full_name": "System Admin",
     "mobile": "09120000000",
-    "email": null,
     "role": "admin",
     "municipality_id": null,
     "is_active": true
@@ -184,9 +187,7 @@ curl -X POST http://localhost:8000/municipalities \
   -H "Content-Type: application/json" \
   -d '{
     "name":"Tehran Municipality",
-    "code":"THR-001",
-    "province":"Tehran",
-    "city":"Tehran"
+    "grade":1
   }'
 ```
 
@@ -199,7 +200,6 @@ curl -X POST http://localhost:8000/users \
   -d '{
     "full_name":"Customer One",
     "mobile":"09121112233",
-    "email":"customer@example.com",
     "role":"customer",
     "municipality_id":1
   }'

@@ -71,7 +71,6 @@ class UserService:
         user = User(
             full_name=dto.full_name,
             mobile=dto.mobile,
-            email=dto.email,
             role=dto.role,
             municipality_id=municipality_id,
             is_active=True,

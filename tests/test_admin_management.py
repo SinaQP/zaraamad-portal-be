@@ -10,7 +10,6 @@ def _create_admin(db_session: Session) -> User:
     admin = User(
         full_name="Main Admin",
         mobile="09120000000",
-        email="admin@example.com",
         role=UserRole.ADMIN,
         municipality_id=None,
         is_active=True,
@@ -41,9 +40,7 @@ def test_admin_can_manage_municipalities_and_users(client: TestClient, db_sessio
         headers=admin_headers,
         json={
             "name": "Tehran Municipality",
-            "code": "THR-001",
-            "province": "Tehran",
-            "city": "Tehran",
+            "grade": 1,
         },
     )
     assert municipality_response.status_code == 201
@@ -55,7 +52,6 @@ def test_admin_can_manage_municipalities_and_users(client: TestClient, db_sessio
         json={
             "full_name": "Customer One",
             "mobile": "09121112233",
-            "email": "customer1@example.com",
             "role": UserRole.CUSTOMER.value,
             "municipality_id": municipality_id,
         },
@@ -111,7 +107,6 @@ def test_admin_cannot_create_customer_without_municipality(
         json={
             "full_name": "Invalid Customer",
             "mobile": "09126667788",
-            "email": "invalid@example.com",
             "role": UserRole.CUSTOMER.value,
             "municipality_id": None,
         },
@@ -119,12 +114,32 @@ def test_admin_cannot_create_customer_without_municipality(
     assert response.status_code == 422
 
 
+def test_admin_can_create_admin_without_municipality(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin = _create_admin(db_session=db_session)
+    admin_token = _login(client=client, mobile=admin.mobile)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    response = client.post(
+        "/users",
+        headers=admin_headers,
+        json={
+            "full_name": "Second Admin",
+            "mobile": "09127778899",
+            "role": UserRole.ADMIN.value,
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["role"] == UserRole.ADMIN.value
+    assert response.json()["municipality_id"] is None
+
+
 def test_customer_cannot_access_admin_endpoints(client: TestClient, db_session: Session) -> None:
     municipality = Municipality(
         name="Qom Municipality",
-        code="QOM-001",
-        province="Qom",
-        city="Qom",
+        grade=2,
         is_active=True,
     )
     db_session.add(municipality)
@@ -134,7 +149,6 @@ def test_customer_cannot_access_admin_endpoints(client: TestClient, db_session: 
     customer = User(
         full_name="Customer User",
         mobile="09123334455",
-        email="customer@example.com",
         role=UserRole.CUSTOMER,
         municipality_id=municipality.id,
         is_active=True,
@@ -151,9 +165,7 @@ def test_customer_cannot_access_admin_endpoints(client: TestClient, db_session: 
         headers=customer_headers,
         json={
             "name": "Should Fail",
-            "code": "FAIL-001",
-            "province": "Tehran",
-            "city": "Tehran",
+            "grade": 3,
         },
     )
     assert response.status_code == 403

@@ -9,9 +9,7 @@ from app.modules.users.schemas import User
 def _create_municipality(db_session: Session) -> Municipality:
     municipality = Municipality(
         name="Tehran Municipality",
-        code="THR-001",
-        province="Tehran",
-        city="Tehran",
+        grade=1,
         is_active=True,
     )
     db_session.add(municipality)
@@ -24,7 +22,6 @@ def _create_admin(db_session: Session) -> User:
     admin = User(
         full_name="Main Admin",
         mobile="09120000000",
-        email="admin@example.com",
         role=UserRole.ADMIN,
         municipality_id=None,
         is_active=True,
@@ -39,7 +36,6 @@ def _create_customer(db_session: Session, municipality_id: int) -> User:
     customer = User(
         full_name="Customer One",
         mobile="09123334455",
-        email="customer@example.com",
         role=UserRole.CUSTOMER,
         municipality_id=municipality_id,
         is_active=True,

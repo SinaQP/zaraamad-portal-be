@@ -9,7 +9,6 @@ def _create_admin(db_session: Session) -> User:
     admin = User(
         full_name="Main Admin",
         mobile="09120000000",
-        email="admin@example.com",
         role=UserRole.ADMIN,
         municipality_id=None,
         is_active=True,

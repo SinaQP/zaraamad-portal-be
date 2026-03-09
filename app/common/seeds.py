@@ -23,7 +23,6 @@ class AdminSeedService:
         admin = User(
             full_name=self._settings.seed_admin_full_name,
             mobile=mobile,
-            email=None,
             role=UserRole.ADMIN,
             municipality_id=None,
             is_active=True,

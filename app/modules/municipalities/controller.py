@@ -21,7 +21,7 @@ router = APIRouter(prefix="/municipalities", tags=["municipalities"])
     responses={
         201: {"description": "Municipality created."},
         403: {"description": "Admin access required."},
-        409: {"description": "Municipality code already exists."},
+        409: {"description": "Data integrity error."},
     },
 )
 def create_municipality(
@@ -84,7 +84,7 @@ def get_municipality(
         200: {"description": "Municipality updated."},
         403: {"description": "Admin access required."},
         404: {"description": "Municipality not found."},
-        409: {"description": "Municipality code already exists."},
+        409: {"description": "Data integrity error."},
     },
 )
 def update_municipality(

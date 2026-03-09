@@ -19,11 +19,6 @@ class CurrentUser(MongoDTO):
     id: int = Field(..., description="Current user id.", examples=[1])
     full_name: str = Field(..., description="Current user full name.", examples=["Admin"])
     mobile: str = Field(..., description="Current user mobile.", examples=["09121234567"])
-    email: str | None = Field(
-        default=None,
-        description="Current user email address.",
-        examples=["admin@zaraamad.ir"],
-    )
     role: UserRole = Field(..., description="Current user role.", examples=[UserRole.ADMIN])
     municipality_id: int | None = Field(
         default=None,
