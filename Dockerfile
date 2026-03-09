@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED=1
 
 COPY . /app
 
-RUN python -m pip install --no-cache-dir -e ".[dev]"
+RUN python -m pip install --no-cache-dir --no-build-isolation -e ".[dev]"
 
 EXPOSE 8000
 
