@@ -169,7 +169,6 @@ User role and municipality rule:
 - `customer` users must provide `municipality_id`
 
 Catalog code behavior:
-- `service_projects.code` can be duplicated
 - `service_groups.code` can be duplicated
 - `services.code` can be duplicated
 

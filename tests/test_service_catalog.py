@@ -340,7 +340,7 @@ def test_create_service_under_group_and_filter_by_group(
     assert services[0]["group_id"] == security_group_id
     assert services[0]["project_id"] == security_project_id
     assert services[0]["group"]["code"] == "security"
-    assert services[0]["project"]["code"] == "security-project"
+    assert services[0]["project"]["name"] == "Security Project"
 
     project_filtered_response = client.get(
         "/services",
@@ -653,7 +653,7 @@ def test_create_municipality_service_config_and_list(
     assert list_response.status_code == 200
     list_data = list_response.json()
     assert len(list_data) == 1
-    assert list_data[0]["project_code"] == "security-project"
+    assert list_data[0]["project_name"] == "Security Project"
     assert list_data[0]["group_code"] == "security"
 
 
@@ -1216,12 +1216,12 @@ def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
     group_map = {item["group_code"]: item for item in groups}
 
     assert group_map["security"]["project_id"] == security_project_id
-    assert group_map["security"]["project_code"] == "security-project"
+    assert group_map["security"]["project_name"] == "Security Project"
     assert group_map["security"]["totals"]["sale_total"] == 100
     assert group_map["security"]["totals"]["support_total"] == 20
     assert group_map["security"]["totals"]["grand_total"] == 120
     assert group_map["infrastructure"]["project_id"] == infra_project_id
-    assert group_map["infrastructure"]["project_code"] == "infrastructure-project"
+    assert group_map["infrastructure"]["project_name"] == "Infrastructure Project"
     assert group_map["infrastructure"]["totals"]["sale_total"] == 300
     assert group_map["infrastructure"]["totals"]["support_total"] == 0
     assert group_map["infrastructure"]["totals"]["grand_total"] == 300
