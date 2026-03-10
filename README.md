@@ -7,6 +7,7 @@ Phase 1 includes:
 - Municipality management
 - Assign users to municipalities
 - Service catalog management
+- Service project management
 - Service group management
 - Municipality-specific service pricing
 
@@ -115,6 +116,11 @@ pytest
 - `GET /users/{id}`
 - `PATCH /users/{id}`
 - `DELETE /users/{id}`
+- `POST /service-projects`
+- `GET /service-projects`
+- `GET /service-projects/{id}`
+- `PATCH /service-projects/{id}`
+- `DELETE /service-projects/{id}`
 - `POST /services`
 - `GET /services`
 - `GET /services/{id}`
@@ -149,6 +155,11 @@ Bulk upsert behavior for `PUT /municipalities/{municipality_id}/services`:
 - Updates existing rows
 - Items omitted from request remain unchanged
 
+Service catalog hierarchy:
+- `service project -> service group -> service`
+- `service_groups.project_id` is required
+- service, group, municipality-config, and pricing-summary responses now include project information
+
 Pricing fields for municipality service config:
 - `sale_price` is required
 - `support_price` is optional (`null` is valid)
@@ -158,6 +169,7 @@ User role and municipality rule:
 - `customer` users must provide `municipality_id`
 
 Catalog code behavior:
+- `service_projects.code` can be duplicated
 - `service_groups.code` can be duplicated
 - `services.code` can be duplicated
 

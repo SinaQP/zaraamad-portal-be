@@ -5,7 +5,44 @@ from pydantic import Field, model_validator
 from app.common.dtos import MongoDTO, WithId
 
 
+class ServiceProjectBase(MongoDTO):
+    code: str = Field(..., description="Service project code.", examples=["digital-transformation"])
+    name: str = Field(..., description="Service project display name.", examples=["Digital Transformation"])
+    description: str | None = Field(
+        default=None,
+        description="Service project description.",
+        examples=["Project umbrella for digital service offerings."],
+    )
+    sort_order: int | None = Field(default=None, description="Sort order for listing.", examples=[10])
+
+
+class ServiceProjectCreate(ServiceProjectBase):
+    pass
+
+
+class ServiceProjectOut(WithId, ServiceProjectBase):
+    is_active: bool = Field(..., description="Service project active status.", examples=[True])
+    created_at: datetime = Field(..., description="Creation timestamp.")
+    updated_at: datetime = Field(..., description="Last update timestamp.")
+
+
+class ServiceProjectUpdate(MongoDTO):
+    code: str | None = Field(default=None, description="Service project code.", examples=["smart-city"])
+    name: str | None = Field(default=None, description="Service project display name.", examples=["Smart City"])
+    description: str | None = Field(default=None, description="Service project description.", examples=["City ops"])
+    sort_order: int | None = Field(default=None, description="Sort order for listing.", examples=[20])
+    is_active: bool | None = Field(default=None, description="Service project active status.", examples=[False])
+
+
+class ServiceProjectInfo(MongoDTO):
+    id: int = Field(..., description="Service project id.", examples=[1])
+    code: str = Field(..., description="Service project code.", examples=["digital-transformation"])
+    name: str = Field(..., description="Service project name.", examples=["Digital Transformation"])
+    is_active: bool = Field(..., description="Service project active status.", examples=[True])
+
+
 class ServiceGroupBase(MongoDTO):
+    project_id: int = Field(..., description="Service project id.", examples=[1])
     code: str = Field(..., description="Service group code.", examples=["security"])
     name: str = Field(..., description="Service group display name.", examples=["Security"])
     description: str | None = Field(
@@ -21,12 +58,14 @@ class ServiceGroupCreate(ServiceGroupBase):
 
 
 class ServiceGroupOut(WithId, ServiceGroupBase):
+    project: ServiceProjectInfo = Field(..., description="Service project information.")
     is_active: bool = Field(..., description="Service group active status.", examples=[True])
     created_at: datetime = Field(..., description="Creation timestamp.")
     updated_at: datetime = Field(..., description="Last update timestamp.")
 
 
 class ServiceGroupUpdate(MongoDTO):
+    project_id: int | None = Field(default=None, description="Service project id.", examples=[1])
     code: str | None = Field(default=None, description="Service group code.", examples=["taxes"])
     name: str | None = Field(default=None, description="Service group display name.", examples=["Taxes"])
     description: str | None = Field(default=None, description="Service group description.", examples=["Tax services"])
@@ -36,6 +75,7 @@ class ServiceGroupUpdate(MongoDTO):
 
 class ServiceGroupInfo(MongoDTO):
     id: int = Field(..., description="Service group id.", examples=[1])
+    project_id: int = Field(..., description="Service project id.", examples=[1])
     code: str = Field(..., description="Service group code.", examples=["security"])
     name: str = Field(..., description="Service group name.", examples=["Security"])
     is_active: bool = Field(..., description="Service group active status.", examples=[True])
@@ -58,7 +98,9 @@ class ServiceCreate(ServiceBase):
 
 
 class ServiceOut(WithId, ServiceBase):
+    project_id: int = Field(..., description="Service project id.", examples=[1])
     is_active: bool = Field(..., description="Service active status.", examples=[True])
+    project: ServiceProjectInfo = Field(..., description="Service project information.")
     group: ServiceGroupInfo = Field(..., description="Service group information.")
     created_at: datetime = Field(..., description="Creation timestamp.")
     updated_at: datetime = Field(..., description="Last update timestamp.")
@@ -92,6 +134,9 @@ class MunicipalityServiceConfigCreate(MunicipalityServiceConfigBase):
 
 class MunicipalityServiceConfigOut(WithId, MunicipalityServiceConfigBase):
     municipality_id: int = Field(..., description="Municipality id.", examples=[1])
+    project_id: int = Field(..., description="Service project id.", examples=[1])
+    project_code: str = Field(..., description="Service project code.", examples=["digital-transformation"])
+    project_name: str = Field(..., description="Service project name.", examples=["Digital Transformation"])
     group_id: int = Field(..., description="Service group id.", examples=[1])
     group_code: str = Field(..., description="Service group code.", examples=["security"])
     group_name: str = Field(..., description="Service group name.", examples=["Security"])
@@ -151,6 +196,9 @@ class MunicipalityPricingSummaryGroupTotals(MongoDTO):
 
 
 class MunicipalityPricingSummaryGroup(MongoDTO):
+    project_id: int = Field(..., description="Service project id.", examples=[1])
+    project_code: str = Field(..., description="Service project code.", examples=["digital-transformation"])
+    project_name: str = Field(..., description="Service project name.", examples=["Digital Transformation"])
     group_id: int = Field(..., description="Service group id.", examples=[1])
     group_code: str = Field(..., description="Service group code.", examples=["security"])
     group_name: str = Field(..., description="Service group name.", examples=["Security"])
