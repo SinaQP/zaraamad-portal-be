@@ -7,6 +7,7 @@ __pycache__
 *.pyd
 .env
 .env.*
+!.env.example
 tests
 .pytest_cache
 .mypy_cache
