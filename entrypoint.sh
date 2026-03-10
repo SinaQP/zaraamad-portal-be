@@ -5,7 +5,7 @@ echo "Running database migrations..."
 alembic upgrade head
 
 echo "Seeding default admin..."
-python -m scripts/seed_admin.py || true
+python -m scripts.seed_admin || true
 
 echo "Starting API..."
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000
