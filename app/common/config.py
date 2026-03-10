@@ -4,10 +4,12 @@ from typing import Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.version import VERSION as BUILD_VERSION
+
 
 class Settings(BaseSettings):
     app_name: str = "Zaraamad Portal API"
-    app_version: str = "1.0.0"
+    app_version: str = BUILD_VERSION
     app_env: str = "development"
     database_url: str = (
         "postgresql+psycopg://postgres:postgres@localhost:5432/zaraamad_portal"
