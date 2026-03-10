@@ -81,6 +81,19 @@ python scripts/seed_admin.py
 uvicorn app.main:app --reload
 ```
 
+## Frontend Origin Access
+
+Browser clients need CORS enabled. This API now allows local frontend dev origins by default:
+- `http://localhost:<any-port>`
+- `http://127.0.0.1:<any-port>`
+- `http://[::1]:<any-port>`
+
+For deployed frontends, add your app URL in `.env`:
+
+```bash
+CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
+```
+
 ## Run Tests
 
 ```bash
