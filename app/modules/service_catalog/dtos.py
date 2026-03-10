@@ -6,7 +6,6 @@ from app.common.dtos import MongoDTO, WithId
 
 
 class ServiceProjectBase(MongoDTO):
-    code: str = Field(..., description="Service project code.", examples=["digital-transformation"])
     name: str = Field(..., description="Service project display name.", examples=["Digital Transformation"])
     description: str | None = Field(
         default=None,
@@ -27,7 +26,6 @@ class ServiceProjectOut(WithId, ServiceProjectBase):
 
 
 class ServiceProjectUpdate(MongoDTO):
-    code: str | None = Field(default=None, description="Service project code.", examples=["smart-city"])
     name: str | None = Field(default=None, description="Service project display name.", examples=["Smart City"])
     description: str | None = Field(default=None, description="Service project description.", examples=["City ops"])
     sort_order: int | None = Field(default=None, description="Sort order for listing.", examples=[20])
@@ -36,7 +34,6 @@ class ServiceProjectUpdate(MongoDTO):
 
 class ServiceProjectInfo(MongoDTO):
     id: int = Field(..., description="Service project id.", examples=[1])
-    code: str = Field(..., description="Service project code.", examples=["digital-transformation"])
     name: str = Field(..., description="Service project name.", examples=["Digital Transformation"])
     is_active: bool = Field(..., description="Service project active status.", examples=[True])
 
@@ -135,7 +132,6 @@ class MunicipalityServiceConfigCreate(MunicipalityServiceConfigBase):
 class MunicipalityServiceConfigOut(WithId, MunicipalityServiceConfigBase):
     municipality_id: int = Field(..., description="Municipality id.", examples=[1])
     project_id: int = Field(..., description="Service project id.", examples=[1])
-    project_code: str = Field(..., description="Service project code.", examples=["digital-transformation"])
     project_name: str = Field(..., description="Service project name.", examples=["Digital Transformation"])
     group_id: int = Field(..., description="Service group id.", examples=[1])
     group_code: str = Field(..., description="Service group code.", examples=["security"])
@@ -197,7 +193,6 @@ class MunicipalityPricingSummaryGroupTotals(MongoDTO):
 
 class MunicipalityPricingSummaryGroup(MongoDTO):
     project_id: int = Field(..., description="Service project id.", examples=[1])
-    project_code: str = Field(..., description="Service project code.", examples=["digital-transformation"])
     project_name: str = Field(..., description="Service project name.", examples=["Digital Transformation"])
     group_id: int = Field(..., description="Service group id.", examples=[1])
     group_code: str = Field(..., description="Service group code.", examples=["security"])

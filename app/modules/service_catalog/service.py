@@ -54,7 +54,6 @@ class MunicipalityLookupService:
 class ServiceProjectQueryBuilder:
     SORT_COLUMNS = {
         "id": ServiceProject.id,
-        "code": ServiceProject.code,
         "name": ServiceProject.name,
         "sort_order": ServiceProject.sort_order,
         "is_active": ServiceProject.is_active,
@@ -76,7 +75,6 @@ class ServiceProjectQueryBuilder:
             search_pattern = f"%{search}%"
             query = query.where(
                 or_(
-                    ServiceProject.code.ilike(search_pattern),
                     ServiceProject.name.ilike(search_pattern),
                     ServiceProject.description.ilike(search_pattern),
                 )
@@ -122,7 +120,6 @@ class ServiceGroupQueryBuilder:
                     ServiceGroup.code.ilike(search_pattern),
                     ServiceGroup.name.ilike(search_pattern),
                     ServiceGroup.description.ilike(search_pattern),
-                    ServiceProject.code.ilike(search_pattern),
                     ServiceProject.name.ilike(search_pattern),
                 )
             )
@@ -188,7 +185,6 @@ class ServiceQueryBuilder:
                     Service.description.ilike(search_pattern),
                     ServiceGroup.code.ilike(search_pattern),
                     ServiceGroup.name.ilike(search_pattern),
-                    ServiceProject.code.ilike(search_pattern),
                     ServiceProject.name.ilike(search_pattern),
                 )
             )
@@ -219,7 +215,6 @@ class ServiceProjectService:
 
     def create(self, dto: ServiceProjectCreate) -> ServiceProject:
         project = ServiceProject(
-            code=dto.code,
             name=dto.name,
             description=dto.description,
             sort_order=dto.sort_order,
@@ -521,7 +516,6 @@ class MunicipalityServiceConfigQueryBuilder:
     SORT_COLUMNS = {
         "id": MunicipalityServiceConfig.id,
         "project_id": ServiceProject.id,
-        "project_code": ServiceProject.code,
         "project_name": ServiceProject.name,
         "project_sort_order": ServiceProject.sort_order,
         "service_id": Service.id,
@@ -566,7 +560,6 @@ class MunicipalityServiceConfigQueryBuilder:
                     Service.name.ilike(search_pattern),
                     ServiceGroup.code.ilike(search_pattern),
                     ServiceGroup.name.ilike(search_pattern),
-                    ServiceProject.code.ilike(search_pattern),
                     ServiceProject.name.ilike(search_pattern),
                     MunicipalityServiceConfig.notes.ilike(search_pattern),
                 )
@@ -826,7 +819,6 @@ class MunicipalityPricingSummaryService:
             if group_entry is None:
                 group_entry = MunicipalityPricingSummaryGroup(
                     project_id=project.id,
-                    project_code=project.code,
                     project_name=project.name,
                     group_id=group.id,
                     group_code=group.code,

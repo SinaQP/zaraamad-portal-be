@@ -13,7 +13,6 @@ class ServiceCatalogMapper:
     def to_service_project_out(self, project: ServiceProject) -> ServiceProjectOut:
         return ServiceProjectOut(
             id=project.id,
-            code=project.code,
             name=project.name,
             description=project.description,
             sort_order=project.sort_order,
@@ -39,7 +38,6 @@ class ServiceCatalogMapper:
     def to_service_project_info(self, project: ServiceProject) -> ServiceProjectInfo:
         return ServiceProjectInfo(
             id=project.id,
-            code=project.code,
             name=project.name,
             is_active=project.is_active,
         )
@@ -78,7 +76,6 @@ class ServiceCatalogMapper:
             municipality_id=config.municipality_id,
             service_id=config.service_id,
             project_id=project.id,
-            project_code=project.code,
             project_name=project.name,
             group_id=group.id,
             group_code=group.code,

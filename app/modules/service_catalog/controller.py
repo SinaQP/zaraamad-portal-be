@@ -72,8 +72,8 @@ def create_service_project(
 def list_service_projects(
     response: Response,
     is_active: bool | None = Query(default=None, description="Filter by active flag."),
-    search: str | None = Query(default=None, description="Search by project code, name, or description."),
-    sort_by: Literal["id", "code", "name", "sort_order", "is_active", "created_at", "updated_at"] = Query(
+    search: str | None = Query(default=None, description="Search by project name or description."),
+    sort_by: Literal["id", "name", "sort_order", "is_active", "created_at", "updated_at"] = Query(
         default="sort_order",
         description="Sort field.",
     ),
@@ -196,7 +196,7 @@ def list_service_groups(
     response: Response,
     project_id: int | None = Query(default=None, description="Filter by service project id."),
     is_active: bool | None = Query(default=None, description="Filter by active flag."),
-    search: str | None = Query(default=None, description="Search by project/group code, name, or description."),
+    search: str | None = Query(default=None, description="Search by project name or group code, name, or description."),
     sort_by: Literal[
         "id",
         "project_id",
@@ -332,7 +332,7 @@ def list_services(
     project_id: int | None = Query(default=None, description="Filter by service project id."),
     group_id: int | None = Query(default=None, description="Filter by service group id."),
     is_active: bool | None = Query(default=None, description="Filter by active flag."),
-    search: str | None = Query(default=None, description="Search by project/group/service code, name, or description."),
+    search: str | None = Query(default=None, description="Search by project name or group/service code, name, or description."),
     sort_by: Literal[
         "id",
         "project_id",
@@ -447,11 +447,10 @@ def list_municipality_services(
     municipality_id: int,
     project_id: int | None = Query(default=None, description="Filter by service project id."),
     is_enabled: bool | None = Query(default=None, description="Filter by enabled state."),
-    search: str | None = Query(default=None, description="Search by project/group/service code, name, or notes."),
+    search: str | None = Query(default=None, description="Search by project name or group/service code, name, or notes."),
     sort_by: Literal[
         "id",
         "project_id",
-        "project_code",
         "project_name",
         "project_sort_order",
         "service_id",

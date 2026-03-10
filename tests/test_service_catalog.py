@@ -66,15 +66,15 @@ def _create_service_project(
     client: TestClient,
     headers: dict[str, str],
     *,
-    code: str,
+    code: str | None = None,
     name: str,
     sort_order: int = 10,
 ) -> int:
+    del code
     response = client.post(
         "/service-projects",
         headers=headers,
         json={
-            "code": code,
             "name": name,
             "description": f"{name} project",
             "sort_order": sort_order,
@@ -162,7 +162,7 @@ def test_create_service_group(client: TestClient, db_session: Session) -> None:
     assert response.status_code == 201
     data = response.json()
     assert data["project_id"] == project_id
-    assert data["project"]["code"] == "security-project"
+    assert data["project"]["name"] == "Security Project"
     assert data["code"] == "security"
     assert data["name"] == "Security"
     assert data["is_active"] is True
@@ -175,7 +175,6 @@ def test_create_service_project(client: TestClient, db_session: Session) -> None
         "/service-projects",
         headers=headers,
         json={
-            "code": "smart-city",
             "name": "Smart City",
             "description": "Smart city umbrella project",
             "sort_order": 1,
@@ -183,36 +182,33 @@ def test_create_service_project(client: TestClient, db_session: Session) -> None
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["code"] == "smart-city"
     assert data["name"] == "Smart City"
     assert data["is_active"] is True
 
 
-def test_duplicate_service_project_code_is_allowed(client: TestClient, db_session: Session) -> None:
+def test_update_and_deactivate_service_project(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
+    project_id = _create_service_project(
+        client=client,
+        headers=headers,
+        name="Base Project",
+    )
 
-    first_response = client.post(
-        "/service-projects",
+    update_response = client.patch(
+        f"/service-projects/{project_id}",
         headers=headers,
         json={
-            "code": "shared-project-code",
-            "name": "Project One",
-            "description": None,
-            "sort_order": 1,
+            "name": "Updated Project",
+            "sort_order": 20,
         },
     )
-    second_response = client.post(
-        "/service-projects",
-        headers=headers,
-        json={
-            "code": "shared-project-code",
-            "name": "Project Two",
-            "description": None,
-            "sort_order": 2,
-        },
-    )
-    assert first_response.status_code == 201
-    assert second_response.status_code == 201
+    assert update_response.status_code == 200
+    assert update_response.json()["name"] == "Updated Project"
+    assert update_response.json()["sort_order"] == 20
+
+    deactivate_response = client.delete(f"/service-projects/{project_id}", headers=headers)
+    assert deactivate_response.status_code == 200
+    assert deactivate_response.json()["is_active"] is False
 
 
 def test_update_service_group(client: TestClient, db_session: Session) -> None:

@@ -20,7 +20,6 @@ def upgrade() -> None:
     op.create_table(
         "service_projects",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("code", sa.String(length=100), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.String(length=1000), nullable=True),
         sa.Column("sort_order", sa.Integer(), nullable=True),
@@ -32,12 +31,12 @@ def upgrade() -> None:
     op.add_column("service_groups", sa.Column("project_id", sa.Integer(), nullable=True))
 
     op.execute(
-        "INSERT INTO service_projects (code, name, description, sort_order, is_active, created_at, updated_at) "
-        "VALUES ('general', 'General', 'Default project for existing service groups.', 0, true, now(), now())"
+        "INSERT INTO service_projects (name, description, sort_order, is_active, created_at, updated_at) "
+        "VALUES ('General', 'Default project for existing service groups.', 0, true, now(), now())"
     )
     op.execute(
         "UPDATE service_groups "
-        "SET project_id = (SELECT id FROM service_projects WHERE code = 'general' ORDER BY id LIMIT 1) "
+        "SET project_id = (SELECT id FROM service_projects ORDER BY id LIMIT 1) "
         "WHERE project_id IS NULL"
     )
 

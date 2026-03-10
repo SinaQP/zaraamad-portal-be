@@ -8,7 +8,6 @@ class ServiceProject(Base, TimestampMixin):
     __tablename__ = "service_projects"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     sort_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
