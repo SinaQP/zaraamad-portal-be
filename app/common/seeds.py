@@ -24,7 +24,7 @@ class AdminSeedService:
             full_name=self._settings.seed_admin_full_name,
             mobile=mobile,
             role=UserRole.ADMIN,
-            municipality_id=None,
+            customer_id=None,
             is_active=True,
         )
         db_session.add(admin)

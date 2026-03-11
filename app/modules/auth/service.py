@@ -15,7 +15,7 @@ from app.common.messages import (
     USER_NOT_FOUND_OR_INACTIVE,
 )
 from app.common.security.jwt_service import JWTService, get_jwt_service
-from app.common.services.otp_provider import OTPProvider, get_otp_provider
+from app.common.services.otp_provider import OTPProvider, OTPProviderError, get_otp_provider
 from app.modules.auth.dtos import AccessTokenOut, OtpRequestCreate, OtpRequestResult, OtpVerifyCreate
 from app.modules.auth.mappers import AuthMapper, get_auth_mapper
 from app.modules.auth.schemas import OTPCode
@@ -73,11 +73,18 @@ class AuthService:
             is_used=False,
         )
         self._db_session.add(otp_record)
-        self._db_session.commit()
-        delivery_result = self._otp_provider.send_login_otp(
-            mobile=dto.mobile,
-            otp_code=otp_code,
-        )
+        try:
+            delivery_result = self._otp_provider.send_login_otp(
+                mobile=dto.mobile,
+                otp_code=otp_code,
+            )
+            self._db_session.commit()
+        except OTPProviderError as exc:
+            self._db_session.rollback()
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=exc.message,
+            ) from exc
         return OtpRequestResult(
             message=delivery_result.message,
             dev_otp=delivery_result.dev_otp,
@@ -128,7 +135,7 @@ class AuthService:
                 user_table.c.full_name,
                 user_table.c.mobile,
                 user_table.c.role,
-                user_table.c.municipality_id,
+                user_table.c.customer_id,
                 user_table.c.is_active,
             ).where(
                 user_table.c.mobile == mobile,

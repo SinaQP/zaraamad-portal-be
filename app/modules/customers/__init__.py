@@ -5,20 +5,20 @@ from sqlalchemy.orm import Session
 
 from app.common.database import get_db_session
 from app.common.enums import SortOrder
-from app.common.messages import DATA_INTEGRITY_ERROR, MUNICIPALITY_NOT_FOUND
+from app.common.messages import DATA_INTEGRITY_ERROR, CUSTOMER_NOT_FOUND
 from app.common.pagination import PaginationMeta, PaginationParams
-from app.modules.municipalities.dtos import MunicipalityCreate, MunicipalityUpdate
-from app.modules.municipalities.schemas import Municipality
+from app.modules.customers.dtos import CustomerCreate, CustomerUpdate
+from app.modules.customers.schemas import Customer
 
 
-class MunicipalityQueryBuilder:
+class CustomerQueryBuilder:
     SORT_COLUMNS = {
-        "id": Municipality.id,
-        "name": Municipality.name,
-        "grade": Municipality.grade,
-        "is_active": Municipality.is_active,
-        "created_at": Municipality.created_at,
-        "updated_at": Municipality.updated_at,
+        "id": Customer.id,
+        "name": Customer.name,
+        "grade": Customer.grade,
+        "is_active": Customer.is_active,
+        "created_at": Customer.created_at,
+        "updated_at": Customer.updated_at,
     }
 
     def build_list_query(
@@ -27,32 +27,32 @@ class MunicipalityQueryBuilder:
         search: str | None,
         sort_by: str,
         sort_order: SortOrder,
-    ) -> Select[tuple[Municipality]]:
-        query = select(Municipality)
+    ) -> Select[tuple[Customer]]:
+        query = select(Customer)
         if is_active is not None:
-            query = query.where(Municipality.is_active.is_(is_active))
+            query = query.where(Customer.is_active.is_(is_active))
         if search:
-            query = query.where(Municipality.name.ilike(f"%{search}%"))
+            query = query.where(Customer.name.ilike(f"%{search}%"))
         sort_column = self.SORT_COLUMNS[sort_by]
         if sort_order == SortOrder.DESC:
-            query = query.order_by(sort_column.desc(), Municipality.id.desc())
+            query = query.order_by(sort_column.desc(), Customer.id.desc())
         else:
-            query = query.order_by(sort_column.asc(), Municipality.id.asc())
+            query = query.order_by(sort_column.asc(), Customer.id.asc())
         return query
 
 
-class MunicipalityService:
+class CustomerService:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
-        self._query_builder = MunicipalityQueryBuilder()
+        self._query_builder = CustomerQueryBuilder()
 
-    def create(self, dto: MunicipalityCreate) -> Municipality:
-        municipality = Municipality(
+    def create(self, dto: CustomerCreate) -> Customer:
+        customer = Customer(
             name=dto.name,
             grade=dto.grade,
             is_active=True,
         )
-        self._db_session.add(municipality)
+        self._db_session.add(customer)
         try:
             self._db_session.commit()
         except IntegrityError as exc:
@@ -61,8 +61,8 @@ class MunicipalityService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail=DATA_INTEGRITY_ERROR,
             ) from exc
-        self._db_session.refresh(municipality)
-        return municipality
+        self._db_session.refresh(customer)
+        return customer
 
     def list(
         self,
@@ -71,7 +71,7 @@ class MunicipalityService:
         sort_by: str,
         sort_order: SortOrder,
         pagination: PaginationParams,
-    ) -> tuple[list[Municipality], PaginationMeta]:
+    ) -> tuple[list[Customer], PaginationMeta]:
         query = self._query_builder.build_list_query(
             is_active=is_active,
             search=search,
@@ -92,20 +92,20 @@ class MunicipalityService:
         )
         return items, meta
 
-    def get_or_404(self, municipality_id: int) -> Municipality:
-        municipality = self._db_session.get(Municipality, municipality_id)
-        if municipality is None:
+    def get_or_404(self, customer_id: int) -> Customer:
+        customer = self._db_session.get(Customer, customer_id)
+        if customer is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=MUNICIPALITY_NOT_FOUND,
+                detail=CUSTOMER_NOT_FOUND,
             )
-        return municipality
+        return customer
 
-    def update(self, municipality_id: int, dto: MunicipalityUpdate) -> Municipality:
-        municipality = self.get_or_404(municipality_id=municipality_id)
+    def update(self, customer_id: int, dto: CustomerUpdate) -> Customer:
+        customer = self.get_or_404(customer_id=customer_id)
         update_data = dto.model_dump(exclude_unset=True, exclude_none=False)
         for field_name, field_value in update_data.items():
-            setattr(municipality, field_name, field_value)
+            setattr(customer, field_name, field_value)
         try:
             self._db_session.commit()
         except IntegrityError as exc:
@@ -114,18 +114,18 @@ class MunicipalityService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail=DATA_INTEGRITY_ERROR,
             ) from exc
-        self._db_session.refresh(municipality)
-        return municipality
+        self._db_session.refresh(customer)
+        return customer
 
-    def deactivate(self, municipality_id: int) -> Municipality:
-        municipality = self.get_or_404(municipality_id=municipality_id)
-        municipality.is_active = False
+    def deactivate(self, customer_id: int) -> Customer:
+        customer = self.get_or_404(customer_id=customer_id)
+        customer.is_active = False
         self._db_session.commit()
-        self._db_session.refresh(municipality)
-        return municipality
+        self._db_session.refresh(customer)
+        return customer
 
 
-def get_municipality_service(
+def get_customer_service(
     db_session: Session = Depends(get_db_session),
-) -> MunicipalityService:
-    return MunicipalityService(db_session=db_session)
+) -> CustomerService:
+    return CustomerService(db_session=db_session)

@@ -9,9 +9,9 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint(
-            "(role = 'admin' AND municipality_id IS NULL) OR "
-            "(role = 'customer' AND municipality_id IS NOT NULL)",
-            name="ck_users_role_municipality",
+            "(role = 'admin' AND customer_id IS NULL) OR "
+            "(role = 'customer' AND customer_id IS NOT NULL)",
+            name="ck_users_role_customer",
         ),
     )
 
@@ -27,7 +27,7 @@ class User(Base, TimestampMixin):
         nullable=False,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    municipality_id: Mapped[int | None] = mapped_column(
-        ForeignKey("municipalities.id", ondelete="RESTRICT"),
+    customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="RESTRICT"),
         nullable=True,
     )

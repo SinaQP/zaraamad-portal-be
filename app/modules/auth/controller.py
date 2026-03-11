@@ -18,6 +18,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
         200: {"description": "OTP generated."},
         404: {"description": "User not found or inactive."},
         429: {"description": "Too many OTP requests."},
+        500: {"description": "OTP delivery provider is not configured correctly."},
+        503: {"description": "OTP delivery provider is unavailable."},
     },
 )
 def request_otp(

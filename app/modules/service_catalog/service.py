@@ -7,13 +7,13 @@ from app.common.database import Base, get_db_session
 from app.common.enums import SortOrder
 from app.common.messages import (
     DATA_INTEGRITY_ERROR,
-    DUPLICATE_MUNICIPALITY_SERVICE_CONFIGURATION,
+    DUPLICATE_CUSTOMER_SERVICE_CONFIGURATION,
     DUPLICATE_SERVICE_ID_IN_PAYLOAD,
     GROUP_ID_CANNOT_BE_NULL,
     GROUP_ID_INVALID,
     INACTIVE_SERVICE_CANNOT_BE_ASSIGNED,
-    MUNICIPALITY_NOT_FOUND,
-    MUNICIPALITY_SERVICE_CONFIG_NOT_FOUND,
+    CUSTOMER_NOT_FOUND,
+    CUSTOMER_SERVICE_CONFIG_NOT_FOUND,
     PROJECT_ID_CANNOT_BE_NULL,
     PROJECT_ID_INVALID,
     SALE_PRICE_CANNOT_BE_NULL,
@@ -24,15 +24,15 @@ from app.common.messages import (
 )
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.modules.service_catalog.dtos import (
-    MunicipalityPricingSummaryGroup,
-    MunicipalityPricingSummaryGroupTotals,
-    MunicipalityPricingSummaryItem,
-    MunicipalityPricingSummaryMunicipality,
-    MunicipalityPricingSummaryResult,
-    MunicipalityPricingSummaryTotals,
-    MunicipalityServiceConfigBulkUpsertCreate,
-    MunicipalityServiceConfigCreate,
-    MunicipalityServiceConfigUpdate,
+    CustomerPricingSummaryGroup,
+    CustomerPricingSummaryGroupTotals,
+    CustomerPricingSummaryItem,
+    CustomerPricingSummaryCustomer,
+    CustomerPricingSummaryResult,
+    CustomerPricingSummaryTotals,
+    CustomerServiceConfigBulkUpsertCreate,
+    CustomerServiceConfigCreate,
+    CustomerServiceConfigUpdate,
     ServiceCreate,
     ServiceGroupCreate,
     ServiceGroupUpdate,
@@ -40,31 +40,31 @@ from app.modules.service_catalog.dtos import (
     ServiceProjectUpdate,
     ServiceUpdate,
 )
-from app.modules.service_catalog.schemas import MunicipalityServiceConfig, Service, ServiceGroup, ServiceProject
+from app.modules.service_catalog.schemas import CustomerServiceConfig, Service, ServiceGroup, ServiceProject
 
 
-class MunicipalityLookupService:
+class CustomerLookupService:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
 
-    def get_or_404(self, municipality_id: int) -> dict[str, int | str]:
-        municipality_table = Base.metadata.tables["municipalities"]
-        municipality_row = self._db_session.execute(
+    def get_or_404(self, customer_id: int) -> dict[str, int | str]:
+        customer_table = Base.metadata.tables["customers"]
+        customer_row = self._db_session.execute(
             select(
-                municipality_table.c.id,
-                municipality_table.c.name,
-                municipality_table.c.grade,
-            ).where(municipality_table.c.id == municipality_id)
+                customer_table.c.id,
+                customer_table.c.name,
+                customer_table.c.grade,
+            ).where(customer_table.c.id == customer_id)
         ).mappings().first()
-        if municipality_row is None:
+        if customer_row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=MUNICIPALITY_NOT_FOUND,
+                detail=CUSTOMER_NOT_FOUND,
             )
         return {
-            "id": municipality_row["id"],
-            "name": municipality_row["name"],
-            "grade": municipality_row["grade"],
+            "id": customer_row["id"],
+            "name": customer_row["name"],
+            "grade": customer_row["grade"],
         }
 
 
@@ -377,7 +377,7 @@ class ServiceGroupService:
             project_id = update_data["project_id"]
             if project_id is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=PROJECT_ID_CANNOT_BE_NULL,
                 )
             self._get_project_or_422(project_id=project_id)
@@ -398,7 +398,7 @@ class ServiceGroupService:
         project = self._db_session.get(ServiceProject, project_id)
         if project is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=PROJECT_ID_INVALID,
             )
         return project
@@ -488,7 +488,7 @@ class ServiceCatalogService:
             group_id = update_data["group_id"]
             if group_id is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=GROUP_ID_CANNOT_BE_NULL,
                 )
             self._get_group_with_project_or_422(group_id=group_id)
@@ -513,7 +513,7 @@ class ServiceCatalogService:
         ).first()
         if row is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=GROUP_ID_INVALID,
             )
         return row[0], row[1]
@@ -529,9 +529,9 @@ class ServiceCatalogService:
             ) from exc
 
 
-class MunicipalityServiceConfigQueryBuilder:
+class CustomerServiceConfigQueryBuilder:
     SORT_COLUMNS = {
-        "id": MunicipalityServiceConfig.id,
+        "id": CustomerServiceConfig.id,
         "project_id": ServiceProject.id,
         "project_name": ServiceProject.name,
         "project_sort_order": ServiceProject.sort_order,
@@ -542,33 +542,33 @@ class MunicipalityServiceConfigQueryBuilder:
         "group_name": ServiceGroup.name,
         "group_sort_order": ServiceGroup.sort_order,
         "service_sort_order": Service.sort_order,
-        "is_enabled": MunicipalityServiceConfig.is_enabled,
-        "sale_price": MunicipalityServiceConfig.sale_price,
-        "support_price": MunicipalityServiceConfig.support_price,
-        "created_at": MunicipalityServiceConfig.created_at,
-        "updated_at": MunicipalityServiceConfig.updated_at,
+        "is_enabled": CustomerServiceConfig.is_enabled,
+        "sale_price": CustomerServiceConfig.sale_price,
+        "support_price": CustomerServiceConfig.support_price,
+        "created_at": CustomerServiceConfig.created_at,
+        "updated_at": CustomerServiceConfig.updated_at,
     }
 
     def build_list_query(
         self,
-        municipality_id: int,
+        customer_id: int,
         project_id: int | None,
         is_enabled: bool | None,
         search: str | None,
         sort_by: str,
         sort_order: SortOrder,
-    ) -> Select[tuple[MunicipalityServiceConfig, Service, ServiceGroup, ServiceProject]]:
+    ) -> Select[tuple[CustomerServiceConfig, Service, ServiceGroup, ServiceProject]]:
         query = (
-            select(MunicipalityServiceConfig, Service, ServiceGroup, ServiceProject)
-            .join(Service, Service.id == MunicipalityServiceConfig.service_id)
+            select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
+            .join(Service, Service.id == CustomerServiceConfig.service_id)
             .join(ServiceGroup, ServiceGroup.id == Service.group_id)
             .join(ServiceProject, ServiceProject.id == ServiceGroup.project_id)
-            .where(MunicipalityServiceConfig.municipality_id == municipality_id)
+            .where(CustomerServiceConfig.customer_id == customer_id)
         )
         if project_id is not None:
             query = query.where(ServiceGroup.project_id == project_id)
         if is_enabled is not None:
-            query = query.where(MunicipalityServiceConfig.is_enabled.is_(is_enabled))
+            query = query.where(CustomerServiceConfig.is_enabled.is_(is_enabled))
         if search:
             search_pattern = f"%{search}%"
             query = query.where(
@@ -578,7 +578,7 @@ class MunicipalityServiceConfigQueryBuilder:
                     ServiceGroup.code.ilike(search_pattern),
                     ServiceGroup.name.ilike(search_pattern),
                     ServiceProject.name.ilike(search_pattern),
-                    MunicipalityServiceConfig.notes.ilike(search_pattern),
+                    CustomerServiceConfig.notes.ilike(search_pattern),
                 )
             )
         sort_column = self.SORT_COLUMNS[sort_by]
@@ -601,15 +601,15 @@ class MunicipalityServiceConfigQueryBuilder:
         return query
 
 
-class MunicipalityServiceConfigPolicy:
+class CustomerServiceConfigPolicy:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
 
-    def validate_payload(self, items: list[MunicipalityServiceConfigCreate]) -> None:
+    def validate_payload(self, items: list[CustomerServiceConfigCreate]) -> None:
         service_ids = [item.service_id for item in items]
         if len(service_ids) != len(set(service_ids)):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=DUPLICATE_SERVICE_ID_IN_PAYLOAD,
             )
 
@@ -623,14 +623,14 @@ class MunicipalityServiceConfigPolicy:
 
     def get_existing_config_map(
         self,
-        municipality_id: int,
+        customer_id: int,
         service_ids: list[int],
-    ) -> dict[int, MunicipalityServiceConfig]:
+    ) -> dict[int, CustomerServiceConfig]:
         existing_configs = list(
             self._db_session.scalars(
-                select(MunicipalityServiceConfig).where(
-                    MunicipalityServiceConfig.municipality_id == municipality_id,
-                    MunicipalityServiceConfig.service_id.in_(service_ids),
+                select(CustomerServiceConfig).where(
+                    CustomerServiceConfig.customer_id == customer_id,
+                    CustomerServiceConfig.service_id.in_(service_ids),
                 )
             ).all()
         )
@@ -639,36 +639,36 @@ class MunicipalityServiceConfigPolicy:
     def validate_service_for_create(self, service: Service | None) -> None:
         if service is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=SERVICE_ID_INVALID,
             )
         if not service.is_active:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=INACTIVE_SERVICE_CANNOT_BE_ASSIGNED,
             )
 
 
-class MunicipalityServiceConfigService:
+class CustomerServiceConfigService:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
-        self._municipality_lookup_service = MunicipalityLookupService(db_session=db_session)
-        self._policy = MunicipalityServiceConfigPolicy(db_session=db_session)
-        self._query_builder = MunicipalityServiceConfigQueryBuilder()
+        self._customer_lookup_service = CustomerLookupService(db_session=db_session)
+        self._policy = CustomerServiceConfigPolicy(db_session=db_session)
+        self._query_builder = CustomerServiceConfigQueryBuilder()
 
-    def list_by_municipality(
+    def list_by_customer(
         self,
-        municipality_id: int,
+        customer_id: int,
         project_id: int | None,
         is_enabled: bool | None,
         search: str | None,
         sort_by: str,
         sort_order: SortOrder,
         pagination: PaginationParams,
-    ) -> tuple[list[tuple[MunicipalityServiceConfig, Service, ServiceGroup, ServiceProject]], PaginationMeta]:
-        self._municipality_lookup_service.get_or_404(municipality_id=municipality_id)
+    ) -> tuple[list[tuple[CustomerServiceConfig, Service, ServiceGroup, ServiceProject]], PaginationMeta]:
+        self._customer_lookup_service.get_or_404(customer_id=customer_id)
         query = self._query_builder.build_list_query(
-            municipality_id=municipality_id,
+            customer_id=customer_id,
             project_id=project_id,
             is_enabled=is_enabled,
             search=search,
@@ -692,16 +692,16 @@ class MunicipalityServiceConfigService:
 
     def bulk_upsert(
         self,
-        municipality_id: int,
-        dto: MunicipalityServiceConfigBulkUpsertCreate,
-    ) -> list[tuple[MunicipalityServiceConfig, Service, ServiceGroup, ServiceProject]]:
-        self._municipality_lookup_service.get_or_404(municipality_id=municipality_id)
+        customer_id: int,
+        dto: CustomerServiceConfigBulkUpsertCreate,
+    ) -> list[tuple[CustomerServiceConfig, Service, ServiceGroup, ServiceProject]]:
+        self._customer_lookup_service.get_or_404(customer_id=customer_id)
         self._policy.validate_payload(items=dto.items)
 
         service_ids = [item.service_id for item in dto.items]
         service_map = self._policy.get_service_map(service_ids=service_ids)
         existing_config_map = self._policy.get_existing_config_map(
-            municipality_id=municipality_id,
+            customer_id=customer_id,
             service_ids=service_ids,
         )
 
@@ -710,8 +710,8 @@ class MunicipalityServiceConfigService:
             service = service_map.get(item.service_id)
             if existing_config is None:
                 self._policy.validate_service_for_create(service=service)
-                new_config = MunicipalityServiceConfig(
-                    municipality_id=municipality_id,
+                new_config = CustomerServiceConfig(
+                    customer_id=customer_id,
                     service_id=item.service_id,
                     is_enabled=item.is_enabled,
                     sale_price=item.sale_price,
@@ -726,23 +726,23 @@ class MunicipalityServiceConfigService:
             existing_config.notes = item.notes
 
         self._commit_with_integrity_guard()
-        return self._list_joined_configs(municipality_id=municipality_id)
+        return self._list_joined_configs(customer_id=customer_id)
 
     def update_single(
         self,
         config_id: int,
-        dto: MunicipalityServiceConfigUpdate,
-    ) -> tuple[MunicipalityServiceConfig, Service, ServiceGroup, ServiceProject]:
-        config = self._db_session.get(MunicipalityServiceConfig, config_id)
+        dto: CustomerServiceConfigUpdate,
+    ) -> tuple[CustomerServiceConfig, Service, ServiceGroup, ServiceProject]:
+        config = self._db_session.get(CustomerServiceConfig, config_id)
         if config is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=MUNICIPALITY_SERVICE_CONFIG_NOT_FOUND,
+                detail=CUSTOMER_SERVICE_CONFIG_NOT_FOUND,
             )
         update_data = dto.model_dump(exclude_unset=True, exclude_none=False)
         if "sale_price" in update_data and update_data["sale_price"] is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=SALE_PRICE_CANNOT_BE_NULL,
             )
         for field_name, field_value in update_data.items():
@@ -750,26 +750,26 @@ class MunicipalityServiceConfigService:
         self._commit_with_integrity_guard()
         self._db_session.refresh(config)
         row = self._db_session.execute(
-            select(MunicipalityServiceConfig, Service, ServiceGroup, ServiceProject)
-            .join(Service, Service.id == MunicipalityServiceConfig.service_id)
+            select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
+            .join(Service, Service.id == CustomerServiceConfig.service_id)
             .join(ServiceGroup, ServiceGroup.id == Service.group_id)
             .join(ServiceProject, ServiceProject.id == ServiceGroup.project_id)
-            .where(MunicipalityServiceConfig.id == config_id)
+            .where(CustomerServiceConfig.id == config_id)
         ).first()
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=MUNICIPALITY_SERVICE_CONFIG_NOT_FOUND,
+                detail=CUSTOMER_SERVICE_CONFIG_NOT_FOUND,
             )
         return row[0], row[1], row[2], row[3]
 
     def _list_joined_configs(
         self,
-        municipality_id: int,
-    ) -> list[tuple[MunicipalityServiceConfig, Service, ServiceGroup, ServiceProject]]:
+        customer_id: int,
+    ) -> list[tuple[CustomerServiceConfig, Service, ServiceGroup, ServiceProject]]:
         rows = self._db_session.execute(
             self._query_builder.build_list_query(
-                municipality_id=municipality_id,
+                customer_id=customer_id,
                 project_id=None,
                 is_enabled=None,
                 search=None,
@@ -785,10 +785,10 @@ class MunicipalityServiceConfigService:
         except IntegrityError as exc:
             self._db_session.rollback()
             error_text = str(exc.orig).lower()
-            if "municipality_service_configs" in error_text or "service_id" in error_text:
+            if "customer_service_configs" in error_text or "service_id" in error_text:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=DUPLICATE_MUNICIPALITY_SERVICE_CONFIGURATION,
+                    detail=DUPLICATE_CUSTOMER_SERVICE_CONFIGURATION,
                 ) from exc
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -796,19 +796,19 @@ class MunicipalityServiceConfigService:
             ) from exc
 
 
-class MunicipalityPricingSummaryService:
+class CustomerPricingSummaryService:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
-        self._municipality_lookup_service = MunicipalityLookupService(db_session=db_session)
+        self._customer_lookup_service = CustomerLookupService(db_session=db_session)
 
-    def get_summary(self, municipality_id: int) -> MunicipalityPricingSummaryResult:
-        municipality = self._municipality_lookup_service.get_or_404(municipality_id=municipality_id)
+    def get_summary(self, customer_id: int) -> CustomerPricingSummaryResult:
+        customer = self._customer_lookup_service.get_or_404(customer_id=customer_id)
         rows = self._db_session.execute(
-            select(MunicipalityServiceConfig, Service, ServiceGroup, ServiceProject)
-            .join(Service, Service.id == MunicipalityServiceConfig.service_id)
+            select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
+            .join(Service, Service.id == CustomerServiceConfig.service_id)
             .join(ServiceGroup, ServiceGroup.id == Service.group_id)
             .join(ServiceProject, ServiceProject.id == ServiceGroup.project_id)
-            .where(MunicipalityServiceConfig.municipality_id == municipality_id)
+            .where(CustomerServiceConfig.customer_id == customer_id)
             .order_by(
                 ServiceProject.sort_order.asc(),
                 ServiceGroup.sort_order.asc(),
@@ -817,12 +817,12 @@ class MunicipalityPricingSummaryService:
             )
         ).all()
 
-        group_bucket: dict[int, MunicipalityPricingSummaryGroup] = {}
+        group_bucket: dict[int, CustomerPricingSummaryGroup] = {}
         total_sale = 0
         total_support = 0
 
         for row in rows:
-            config: MunicipalityServiceConfig = row[0]
+            config: CustomerServiceConfig = row[0]
             service: Service = row[1]
             group: ServiceGroup = row[2]
             project: ServiceProject = row[3]
@@ -834,14 +834,14 @@ class MunicipalityPricingSummaryService:
 
             group_entry = group_bucket.get(group.id)
             if group_entry is None:
-                group_entry = MunicipalityPricingSummaryGroup(
+                group_entry = CustomerPricingSummaryGroup(
                     project_id=project.id,
                     project_name=project.name,
                     group_id=group.id,
                     group_code=group.code,
                     group_name=group.name,
                     items=[],
-                    totals=MunicipalityPricingSummaryGroupTotals(
+                    totals=CustomerPricingSummaryGroupTotals(
                         sale_total=0,
                         support_total=0,
                         grand_total=0,
@@ -850,7 +850,7 @@ class MunicipalityPricingSummaryService:
                 group_bucket[group.id] = group_entry
 
             group_entry.items.append(
-                MunicipalityPricingSummaryItem(
+                CustomerPricingSummaryItem(
                     service_id=service.id,
                     service_code=service.code,
                     service_name=service.name,
@@ -871,14 +871,14 @@ class MunicipalityPricingSummaryService:
                 total_support += line_support_total
 
         groups = list(group_bucket.values())
-        return MunicipalityPricingSummaryResult(
-            municipality=MunicipalityPricingSummaryMunicipality(
-                id=int(municipality["id"]),
-                name=str(municipality["name"]),
-                grade=int(municipality["grade"]),
+        return CustomerPricingSummaryResult(
+            customer=CustomerPricingSummaryCustomer(
+                id=int(customer["id"]),
+                name=str(customer["name"]),
+                grade=int(customer["grade"]),
             ),
             groups=groups,
-            totals=MunicipalityPricingSummaryTotals(
+            totals=CustomerPricingSummaryTotals(
                 sale_total=total_sale,
                 support_total=total_support,
                 grand_total=total_sale + total_support,
@@ -904,13 +904,14 @@ def get_service_catalog_service(
     return ServiceCatalogService(db_session=db_session)
 
 
-def get_municipality_service_config_service(
+def get_customer_service_config_service(
     db_session: Session = Depends(get_db_session),
-) -> MunicipalityServiceConfigService:
-    return MunicipalityServiceConfigService(db_session=db_session)
+) -> CustomerServiceConfigService:
+    return CustomerServiceConfigService(db_session=db_session)
 
 
-def get_municipality_pricing_summary_service(
+def get_customer_pricing_summary_service(
     db_session: Session = Depends(get_db_session),
-) -> MunicipalityPricingSummaryService:
-    return MunicipalityPricingSummaryService(db_session=db_session)
+) -> CustomerPricingSummaryService:
+    return CustomerPricingSummaryService(db_session=db_session)
+

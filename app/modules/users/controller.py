@@ -23,7 +23,7 @@ router = APIRouter(prefix="/users", tags=["users"])
         201: {"description": "User created."},
         403: {"description": "Admin access required."},
         409: {"description": "Mobile number already exists."},
-        422: {"description": "Validation failed for role and municipality relation."},
+        422: {"description": "Validation failed for role and customer relation."},
     },
 )
 def create_user(
@@ -40,7 +40,7 @@ def create_user(
     "",
     response_model=list[UserOut],
     summary="List users",
-    description="Return users with optional role, municipality, and active-state filters.",
+    description="Return users with optional role, customer, and active-state filters.",
     responses={
         200: {"description": "User list returned."},
         403: {"description": "Admin access required."},
@@ -49,7 +49,7 @@ def create_user(
 def list_users(
     response: Response,
     role: UserRole | None = Query(default=None, description="Filter by role."),
-    municipality_id: int | None = Query(default=None, description="Filter by municipality id."),
+    customer_id: int | None = Query(default=None, description="Filter by customer id."),
     is_active: bool | None = Query(default=None, description="Filter by active flag."),
     search: str | None = Query(default=None, description="Search by user full name or mobile."),
     sort_by: Literal[
@@ -57,7 +57,7 @@ def list_users(
         "full_name",
         "mobile",
         "role",
-        "municipality_id",
+        "customer_id",
         "is_active",
         "created_at",
         "updated_at",
@@ -71,7 +71,7 @@ def list_users(
 ) -> list[UserOut]:
     users, meta = service.list(
         role=role,
-        municipality_id=municipality_id,
+        customer_id=customer_id,
         is_active=is_active,
         search=search,
         sort_by=sort_by,
@@ -107,13 +107,13 @@ def get_user(
     "/{user_id}",
     response_model=UserOut,
     summary="Update user",
-    description="Partially update user data including role, municipality assignment, and active status.",
+    description="Partially update user data including role, customer assignment, and active status.",
     responses={
         200: {"description": "User updated."},
         403: {"description": "Admin access required."},
         404: {"description": "User not found."},
         409: {"description": "Data integrity error."},
-        422: {"description": "Validation failed for role and municipality relation."},
+        422: {"description": "Validation failed for role and customer relation."},
     },
 )
 def update_user(

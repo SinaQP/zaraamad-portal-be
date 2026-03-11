@@ -1,12 +1,12 @@
 from app.modules.service_catalog.dtos import (
-    MunicipalityServiceConfigOut,
+    CustomerServiceConfigOut,
     ServiceGroupInfo,
     ServiceGroupOut,
     ServiceOut,
     ServiceProjectInfo,
     ServiceProjectOut,
 )
-from app.modules.service_catalog.schemas import MunicipalityServiceConfig, Service, ServiceGroup, ServiceProject
+from app.modules.service_catalog.schemas import CustomerServiceConfig, Service, ServiceGroup, ServiceProject
 
 
 class ServiceCatalogMapper:
@@ -64,16 +64,16 @@ class ServiceCatalogMapper:
             updated_at=service.updated_at,
         )
 
-    def to_municipality_config_out(
+    def to_customer_config_out(
         self,
-        config: MunicipalityServiceConfig,
+        config: CustomerServiceConfig,
         service: Service,
         group: ServiceGroup,
         project: ServiceProject,
-    ) -> MunicipalityServiceConfigOut:
-        return MunicipalityServiceConfigOut(
+    ) -> CustomerServiceConfigOut:
+        return CustomerServiceConfigOut(
             id=config.id,
-            municipality_id=config.municipality_id,
+            customer_id=config.customer_id,
             service_id=config.service_id,
             project_id=project.id,
             project_name=project.name,

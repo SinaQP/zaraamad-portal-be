@@ -18,7 +18,7 @@ from app.common.security.jwt_service import JWTService, get_jwt_service
 
 bearer_scheme = HTTPBearer(
     auto_error=False,
-    description="Enter the JWT access token from /auth/verify-otp.",
+    description="Enter the JWT access token returned by /auth/verify-otp.",
 )
 
 
@@ -54,7 +54,7 @@ class CurrentUserResolver:
                 user_table.c.full_name,
                 user_table.c.mobile,
                 user_table.c.role,
-                user_table.c.municipality_id,
+                user_table.c.customer_id,
                 user_table.c.is_active,
             ).where(user_table.c.id == parsed_user_id)
         ).mappings().first()
@@ -73,7 +73,7 @@ class CurrentUserResolver:
             full_name=row["full_name"],
             mobile=row["mobile"],
             role=row["role"],
-            municipality_id=row["municipality_id"],
+            customer_id=row["customer_id"],
             is_active=row["is_active"],
         )
 

@@ -2,14 +2,14 @@
 
 Phase 1 includes:
 - User management
-- OTP login (mock/dev mode)
+- OTP login (mock/dev mode + single SMS panel integration)
 - JWT access authentication
-- Municipality management
-- Assign users to municipalities
+- Customer management
+- Assign users to customers
 - Service catalog management
 - Service project management
 - Service group management
-- Municipality-specific service pricing
+- Customer-specific service pricing
 
 Refresh token is not implemented in this phase to keep authentication flow minimal and focused on access-token based APIs.
 
@@ -44,7 +44,7 @@ app/
       mobile_validator.py
   modules/
     auth/
-    municipalities/
+    customers/
     users/
   main.py
 alembic/
@@ -95,6 +95,12 @@ For deployed frontends, add your app URL in `.env`:
 CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
 ```
 
+OTP delivery modes:
+- `OTP_DEV_MODE=true`: OTP is returned in the API response for local development.
+- `OTP_DEV_MODE=false`: OTP is sent by SMS.
+- Configure the single SMS panel with `SMS_PANEL_ORGANIZATION`, `SMS_PANEL_USERNAME`, `SMS_PANEL_PASSWORD`.
+- Optional overrides: `SMS_API_URL`, `SMS_PANEL_SENDER`, `SMS_REQUEST_TIMEOUT_SECONDS`.
+
 ## Run Tests
 
 ```bash
@@ -106,11 +112,11 @@ pytest
 - `POST /auth/request-otp`
 - `POST /auth/verify-otp`
 - `GET /auth/me`
-- `POST /municipalities`
-- `GET /municipalities`
-- `GET /municipalities/{id}`
-- `PATCH /municipalities/{id}`
-- `DELETE /municipalities/{id}`
+- `POST /customers`
+- `GET /customers`
+- `GET /customers/{id}`
+- `PATCH /customers/{id}`
+- `DELETE /customers/{id}`
 - `POST /users`
 - `GET /users`
 - `GET /users/{id}`
@@ -131,10 +137,10 @@ pytest
 - `GET /service-groups/{id}`
 - `PATCH /service-groups/{id}`
 - `DELETE /service-groups/{id}`
-- `GET /municipalities/{municipality_id}/services`
-- `PUT /municipalities/{municipality_id}/services`
-- `PATCH /municipality-service-configs/{id}`
-- `GET /municipalities/{municipality_id}/pricing-summary`
+- `GET /customers/{customer_id}/services`
+- `PUT /customers/{customer_id}/services`
+- `PATCH /customer-service-configs/{id}`
+- `GET /customers/{customer_id}/pricing-summary`
 
 List API query options (available on list endpoints):
 - `search`: free-text search on relevant fields
@@ -149,7 +155,7 @@ Pagination metadata is returned in response headers:
 - `X-Page-Size`
 - `X-Total-Pages`
 
-Bulk upsert behavior for `PUT /municipalities/{municipality_id}/services`:
+Bulk upsert behavior for `PUT /customers/{customer_id}/services`:
 - Upserts provided `service_id` rows
 - Creates missing rows
 - Updates existing rows
@@ -158,15 +164,15 @@ Bulk upsert behavior for `PUT /municipalities/{municipality_id}/services`:
 Service catalog hierarchy:
 - `service project -> service group -> service`
 - `service_groups.project_id` is required
-- service, group, municipality-config, and pricing-summary responses now include project information
+- service, group, customer-config, and pricing-summary responses now include project information
 
-Pricing fields for municipality service config:
+Pricing fields for customer service config:
 - `sale_price` is required
 - `support_price` is optional (`null` is valid)
 
-User role and municipality rule:
-- `admin` users do not require `municipality_id` (it is stored as `null`)
-- `customer` users must provide `municipality_id`
+User role and customer rule:
+- `admin` users do not require `customer_id` (it is stored as `null`)
+- `customer` users must provide `customer_id`
 
 Catalog code behavior:
 - `service_groups.code` can be duplicated
@@ -210,20 +216,20 @@ Response:
     "full_name": "System Admin",
     "mobile": "09120000000",
     "role": "admin",
-    "municipality_id": null,
+    "customer_id": null,
     "is_active": true
   }
 }
 ```
 
-### Create Municipality (Admin)
+### Create Customer (Admin)
 
 ```bash
-curl -X POST http://localhost:8000/municipalities \
+curl -X POST http://localhost:8000/customers \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
-    "name":"Tehran Municipality",
+    "name":"Tehran Customer",
     "grade":1
   }'
 ```
@@ -238,6 +244,6 @@ curl -X POST http://localhost:8000/users \
     "full_name":"Customer One",
     "mobile":"09121112233",
     "role":"customer",
-    "municipality_id":1
+    "customer_id":1
   }'
 ```

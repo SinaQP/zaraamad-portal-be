@@ -20,9 +20,9 @@ class CurrentUser(MongoDTO):
     full_name: str = Field(..., description="Current user full name.", examples=["Admin"])
     mobile: str = Field(..., description="Current user mobile.", examples=["09121234567"])
     role: UserRole = Field(..., description="Current user role.", examples=[UserRole.ADMIN])
-    municipality_id: int | None = Field(
+    customer_id: int | None = Field(
         default=None,
-        description="Current user municipality id if role is customer.",
+        description="Current user customer id if role is customer.",
         examples=[10],
     )
     is_active: bool = Field(..., description="Current user active status.", examples=[True])
