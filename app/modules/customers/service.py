@@ -117,6 +117,10 @@ class CustomerService:
         )
         return items, meta
 
+    def list_all(self) -> list[Customer]:
+        query = select(Customer).order_by(Customer.id.asc())
+        return list(self._db_session.scalars(query).all())
+
     def get_or_404(self, customer_id: int) -> Customer:
         customer = self._db_session.get(Customer, customer_id)
         if customer is None:

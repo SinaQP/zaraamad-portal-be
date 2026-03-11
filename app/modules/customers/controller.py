@@ -86,6 +86,25 @@ def list_customers(
 
 
 @router.get(
+    "/all",
+    response_model=list[CustomerOut],
+    summary="Get all customers",
+    description="Return all customers without filters, search, sorting, or pagination.",
+    responses={
+        200: {"description": "All customers returned."},
+        403: {"description": "Admin access required."},
+    },
+)
+def get_all_customers(
+    _: object = Depends(require_admin),
+    service: CustomerService = Depends(get_customer_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> list[CustomerOut]:
+    customers = service.list_all()
+    return [mapper.to_out(customer=item) for item in customers]
+
+
+@router.get(
     "/{customer_id}",
     response_model=CustomerOut,
     summary="Get customer by id",

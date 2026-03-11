@@ -263,6 +263,34 @@ def test_customers_list_supports_search_sort_and_pagination(
     assert paged_response.headers["X-Total-Pages"] == "2"
 
 
+def test_get_all_customers_returns_all_items_without_pagination(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin = _create_admin(db_session=db_session)
+    admin_token = _login(client=client, mobile=admin.mobile)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    for payload in [
+        {"name": "Alpha Customer", "grade": 1},
+        {"name": "Beta Customer", "grade": 2},
+        {"name": "Gamma Customer", "grade": 3},
+    ]:
+        response = client.post("/customers", headers=admin_headers, json=payload)
+        assert response.status_code == 201
+
+    response = client.get("/customers/all", headers=admin_headers)
+    assert response.status_code == 200
+
+    items = response.json()
+    assert len(items) == 3
+    assert [item["name"] for item in items] == [
+        "Alpha Customer",
+        "Beta Customer",
+        "Gamma Customer",
+    ]
+
+
 def test_customer_cannot_access_admin_endpoints(client: TestClient, db_session: Session) -> None:
     customer = Customer(
         name="Qom Customer",
