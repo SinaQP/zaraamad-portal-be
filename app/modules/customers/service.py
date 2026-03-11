@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, status
@@ -89,7 +91,7 @@ class CustomerService:
         self._db_session.refresh(customer)
         return customer
 
-    def list(
+    def list_customers(
         self,
         is_active: bool | None,
         search: str | None,

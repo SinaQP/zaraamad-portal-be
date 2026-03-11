@@ -71,7 +71,7 @@ def list_customers(
     service: CustomerService = Depends(get_customer_service),
     mapper: CustomerMapper = Depends(get_customer_mapper),
 ) -> CustomerListOut:
-    customers, meta = service.list(
+    customers, meta = service.list_customers(
         is_active=is_active,
         search=search,
         sort_by=sort_by,
