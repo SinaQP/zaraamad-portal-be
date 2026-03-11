@@ -40,8 +40,8 @@ class SmsDeliveryError(SmsServiceError):
 class LoginOtpMessageBuilder:
     def build(self, otp_code: str) -> str:
         return (
-            f"Ú©Ø¯ ØªØ§ÛŒÛŒØ¯ ÙˆØ±ÙˆØ¯ Ø´Ù…Ø§: {otp_code}\n"
-            "Ø§ÛŒÙ† Ú©Ø¯ Ø±Ø§ Ø¯Ø± Ø§Ø®ØªÛŒØ§Ø± Ø¯ÛŒÚ¯Ø±Ø§Ù† Ù‚Ø±Ø§Ø± Ù†Ø¯Ù‡ÛŒØ¯."
+            f"کد تایید ورود شما: {otp_code}\n"
+            "این کد را در اختیار دیگران قرار ندهید."
         )
 
 

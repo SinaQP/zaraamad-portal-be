@@ -9,7 +9,7 @@ class UserMapper:
             full_name=user.full_name,
             mobile=user.mobile,
             role=user.role,
-            municipality_id=user.municipality_id,
+            customer_id=user.customer_id,
             is_active=user.is_active,
             created_at=user.created_at,
             updated_at=user.updated_at,

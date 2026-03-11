@@ -12,7 +12,7 @@ class AuthMapper:
             full_name=user_row["full_name"],
             mobile=user_row["mobile"],
             role=user_row["role"],
-            municipality_id=user_row["municipality_id"],
+            customer_id=user_row["customer_id"],
             is_active=user_row["is_active"],
         )
 
@@ -22,7 +22,7 @@ class AuthMapper:
             full_name=current_user.full_name,
             mobile=current_user.mobile,
             role=current_user.role,
-            municipality_id=current_user.municipality_id,
+            customer_id=current_user.customer_id,
             is_active=current_user.is_active,
         )
 

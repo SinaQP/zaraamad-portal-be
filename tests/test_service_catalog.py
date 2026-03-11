@@ -6,21 +6,22 @@ from app.common.messages import (
     ADMIN_ACCESS_REQUIRED,
     DUPLICATE_SERVICE_ID_IN_PAYLOAD,
     MISSING_AUTH_TOKEN,
+    VALIDATION_ERROR_MESSAGE,
 )
-from app.modules.municipalities.schemas import Municipality
+from app.modules.customers.schemas import Customer
 from app.modules.users.schemas import User
 
 
-def _create_municipality(db_session: Session) -> Municipality:
-    municipality = Municipality(
-        name="Tehran Municipality",
+def _create_customer_entity(db_session: Session) -> Customer:
+    customer = Customer(
+        name="Tehran Customer",
         grade=1,
         is_active=True,
     )
-    db_session.add(municipality)
+    db_session.add(customer)
     db_session.commit()
-    db_session.refresh(municipality)
-    return municipality
+    db_session.refresh(customer)
+    return customer
 
 
 def _create_admin(db_session: Session) -> User:
@@ -28,7 +29,7 @@ def _create_admin(db_session: Session) -> User:
         full_name="Main Admin",
         mobile="09120000000",
         role=UserRole.ADMIN,
-        municipality_id=None,
+        customer_id=None,
         is_active=True,
     )
     db_session.add(admin)
@@ -37,12 +38,12 @@ def _create_admin(db_session: Session) -> User:
     return admin
 
 
-def _create_customer(db_session: Session, municipality_id: int) -> User:
+def _create_customer_user(db_session: Session, customer_id: int) -> User:
     customer = User(
         full_name="Customer One",
         mobile="09123334455",
         role=UserRole.CUSTOMER,
-        municipality_id=municipality_id,
+        customer_id=customer_id,
         is_active=True,
     )
     db_session.add(customer)
@@ -602,12 +603,12 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
     assert service_paged.headers["X-Total-Pages"] == "2"
 
 
-def test_create_municipality_service_config_and_list(
+def test_create_customer_service_config_and_list(
     client: TestClient,
     db_session: Session,
 ) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    municipality = _create_municipality(db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
     project_id = _create_service_project(
         client=client,
         headers=headers,
@@ -630,7 +631,7 @@ def test_create_municipality_service_config_and_list(
     )
 
     upsert_response = client.put(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         json={
             "items": [
@@ -647,14 +648,14 @@ def test_create_municipality_service_config_and_list(
     assert upsert_response.status_code == 200
     upsert_data = upsert_response.json()
     assert len(upsert_data) == 1
-    assert upsert_data[0]["municipality_id"] == municipality.id
+    assert upsert_data[0]["customer_id"] == customer.id
     assert upsert_data[0]["service_id"] == service_id
     assert upsert_data[0]["project_id"] == project_id
     assert upsert_data[0]["group_id"] == group_id
     assert upsert_data[0]["sale_price"] == 4000000
     assert upsert_data[0]["support_price"] == 800000
 
-    list_response = client.get(f"/municipalities/{municipality.id}/services", headers=headers)
+    list_response = client.get(f"/customers/{customer.id}/services", headers=headers)
     assert list_response.status_code == 200
     list_data = list_response.json()
     assert len(list_data) == 1
@@ -662,12 +663,12 @@ def test_create_municipality_service_config_and_list(
     assert list_data[0]["group_code"] == "security"
 
 
-def test_municipality_service_list_supports_filter_search_sort_and_pagination(
+def test_customer_service_list_supports_filter_search_sort_and_pagination(
     client: TestClient,
     db_session: Session,
 ) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    municipality = _create_municipality(db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
     project_id = _create_service_project(
         client=client,
         headers=headers,
@@ -709,7 +710,7 @@ def test_municipality_service_list_supports_filter_search_sort_and_pagination(
     )
 
     upsert_response = client.put(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         json={
             "items": [
@@ -740,7 +741,7 @@ def test_municipality_service_list_supports_filter_search_sort_and_pagination(
     assert upsert_response.status_code == 200
 
     filtered_response = client.get(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         params={
             "is_enabled": True,
@@ -755,7 +756,7 @@ def test_municipality_service_list_supports_filter_search_sort_and_pagination(
     assert filtered_response.headers["X-Total-Count"] == "1"
 
     project_filtered_response = client.get(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         params={"project_id": project_id},
     )
@@ -763,7 +764,7 @@ def test_municipality_service_list_supports_filter_search_sort_and_pagination(
     assert len(project_filtered_response.json()) == 3
 
     paged_response = client.get(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         params={
             "sort_by": "sale_price",
@@ -781,12 +782,12 @@ def test_municipality_service_list_supports_filter_search_sort_and_pagination(
     assert paged_response.headers["X-Total-Pages"] == "2"
 
 
-def test_bulk_upsert_municipality_service_configs_omitted_items_remain_unchanged(
+def test_bulk_upsert_customer_service_configs_omitted_items_remain_unchanged(
     client: TestClient,
     db_session: Session,
 ) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    municipality = _create_municipality(db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
     group_id = _create_service_group(
         client=client,
         headers=headers,
@@ -817,7 +818,7 @@ def test_bulk_upsert_municipality_service_configs_omitted_items_remain_unchanged
     )
 
     first_upsert = client.put(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         json={
             "items": [
@@ -841,7 +842,7 @@ def test_bulk_upsert_municipality_service_configs_omitted_items_remain_unchanged
     assert first_upsert.status_code == 200
 
     second_upsert = client.put(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         json={
             "items": [
@@ -864,7 +865,7 @@ def test_bulk_upsert_municipality_service_configs_omitted_items_remain_unchanged
     )
     assert second_upsert.status_code == 200
 
-    list_response = client.get(f"/municipalities/{municipality.id}/services", headers=headers)
+    list_response = client.get(f"/customers/{customer.id}/services", headers=headers)
     assert list_response.status_code == 200
     items = list_response.json()
     assert len(items) == 3
@@ -876,12 +877,12 @@ def test_bulk_upsert_municipality_service_configs_omitted_items_remain_unchanged
     assert item_map[service_b]["support_price"] == 200000
 
 
-def test_duplicate_municipality_service_pair_is_rejected(
+def test_duplicate_customer_service_pair_is_rejected(
     client: TestClient,
     db_session: Session,
 ) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    municipality = _create_municipality(db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
     group_id = _create_service_group(
         client=client,
         headers=headers,
@@ -897,7 +898,7 @@ def test_duplicate_municipality_service_pair_is_rejected(
     )
 
     response = client.put(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         json={
             "items": [
@@ -919,12 +920,14 @@ def test_duplicate_municipality_service_pair_is_rejected(
         },
     )
     assert response.status_code == 422
+    assert response.json()["message"] == DUPLICATE_SERVICE_ID_IN_PAYLOAD
     assert response.json()["detail"] == DUPLICATE_SERVICE_ID_IN_PAYLOAD
+    assert response.json()["developer_message"] == "The payload contains duplicate service_id values."
 
 
 def test_sale_price_is_required(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    municipality = _create_municipality(db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
     group_id = _create_service_group(
         client=client,
         headers=headers,
@@ -940,7 +943,7 @@ def test_sale_price_is_required(client: TestClient, db_session: Session) -> None
     )
 
     response = client.put(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         json={
             "items": [
@@ -954,12 +957,13 @@ def test_sale_price_is_required(client: TestClient, db_session: Session) -> None
         },
     )
     assert response.status_code == 422
-    assert response.json()["detail"][0]["msg"] == "اين فيلد الزامي است."
+    assert response.json()["message"] == VALIDATION_ERROR_MESSAGE
+    assert response.json()["detail"][0]["msg"] == "\u0627\u06cc\u0646 \u0641\u06cc\u0644\u062f \u0627\u0644\u0632\u0627\u0645\u06cc \u0627\u0633\u062a."
 
 
 def test_negative_sale_price_is_rejected(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    municipality = _create_municipality(db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
     group_id = _create_service_group(
         client=client,
         headers=headers,
@@ -975,7 +979,7 @@ def test_negative_sale_price_is_rejected(client: TestClient, db_session: Session
     )
 
     response = client.put(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         json={
             "items": [
@@ -990,12 +994,13 @@ def test_negative_sale_price_is_rejected(client: TestClient, db_session: Session
         },
     )
     assert response.status_code == 422
-    assert response.json()["detail"][0]["msg"] == "مقدار بايد بزرگ تر يا مساوي 0 باشد."
+    assert response.json()["message"] == VALIDATION_ERROR_MESSAGE
+    assert response.json()["detail"][0]["msg"] == "\u0645\u0642\u062f\u0627\u0631 \u0628\u0627\u06cc\u062f \u0628\u0632\u0631\u06af \u062a\u0631 \u06cc\u0627 \u0645\u0633\u0627\u0648\u06cc 0 \u0628\u0627\u0634\u062f."
 
 
 def test_null_support_price_is_accepted(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    municipality = _create_municipality(db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
     group_id = _create_service_group(
         client=client,
         headers=headers,
@@ -1011,7 +1016,7 @@ def test_null_support_price_is_accepted(client: TestClient, db_session: Session)
     )
 
     response = client.put(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         json={
             "items": [
@@ -1031,7 +1036,7 @@ def test_null_support_price_is_accepted(client: TestClient, db_session: Session)
 
 def test_negative_support_price_is_rejected(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    municipality = _create_municipality(db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
     group_id = _create_service_group(
         client=client,
         headers=headers,
@@ -1047,7 +1052,7 @@ def test_negative_support_price_is_rejected(client: TestClient, db_session: Sess
     )
 
     response = client.put(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         json={
             "items": [
@@ -1064,9 +1069,9 @@ def test_negative_support_price_is_rejected(client: TestClient, db_session: Sess
     assert response.status_code == 422
 
 
-def test_patch_single_municipality_service_config(client: TestClient, db_session: Session) -> None:
+def test_patch_single_customer_service_config(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    municipality = _create_municipality(db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
     group_id = _create_service_group(
         client=client,
         headers=headers,
@@ -1082,7 +1087,7 @@ def test_patch_single_municipality_service_config(client: TestClient, db_session
     )
 
     create_response = client.put(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         json={
             "items": [
@@ -1100,7 +1105,7 @@ def test_patch_single_municipality_service_config(client: TestClient, db_session
     config_id = create_response.json()[0]["id"]
 
     patch_response = client.patch(
-        f"/municipality-service-configs/{config_id}",
+        f"/customer-service-configs/{config_id}",
         headers=headers,
         json={
             "is_enabled": False,
@@ -1122,7 +1127,7 @@ def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
     db_session: Session,
 ) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    municipality = _create_municipality(db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
     security_project_id = _create_service_project(
         client=client,
         headers=headers,
@@ -1178,7 +1183,7 @@ def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
     )
 
     upsert_response = client.put(
-        f"/municipalities/{municipality.id}/services",
+        f"/customers/{customer.id}/services",
         headers=headers,
         json={
             "items": [
@@ -1209,7 +1214,7 @@ def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
     assert upsert_response.status_code == 200
 
     summary_response = client.get(
-        f"/municipalities/{municipality.id}/pricing-summary",
+        f"/customers/{customer.id}/pricing-summary",
         headers=headers,
     )
     assert summary_response.status_code == 200
@@ -1248,9 +1253,9 @@ def test_admin_only_access_enforced_and_customer_access_denied(
     client: TestClient,
     db_session: Session,
 ) -> None:
-    municipality = _create_municipality(db_session=db_session)
-    customer = _create_customer(db_session=db_session, municipality_id=municipality.id)
-    customer_token = _login(client=client, mobile=customer.mobile)
+    customer_entity = _create_customer_entity(db_session=db_session)
+    customer_user = _create_customer_user(db_session=db_session, customer_id=customer_entity.id)
+    customer_token = _login(client=client, mobile=customer_user.mobile)
     headers = _admin_headers(client=client, db_session=db_session)
     project_id = _create_service_project(
         client=client,
@@ -1270,7 +1275,9 @@ def test_admin_only_access_enforced_and_customer_access_denied(
         },
     )
     assert unauthorized_response.status_code == 401
+    assert unauthorized_response.json()["message"] == MISSING_AUTH_TOKEN
     assert unauthorized_response.json()["detail"] == MISSING_AUTH_TOKEN
+    assert unauthorized_response.json()["developer_message"] == "Authorization bearer token was not provided."
 
     customer_response = client.post(
         "/service-groups",
@@ -1284,4 +1291,8 @@ def test_admin_only_access_enforced_and_customer_access_denied(
         },
     )
     assert customer_response.status_code == 403
+    assert customer_response.json()["message"] == ADMIN_ACCESS_REQUIRED
     assert customer_response.json()["detail"] == ADMIN_ACCESS_REQUIRED
+    assert customer_response.json()["developer_message"] == "Authenticated user does not have admin role."
+
+

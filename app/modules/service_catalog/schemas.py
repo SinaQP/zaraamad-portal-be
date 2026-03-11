@@ -46,24 +46,24 @@ class Service(Base, TimestampMixin):
     sort_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
-class MunicipalityServiceConfig(Base, TimestampMixin):
-    __tablename__ = "municipality_service_configs"
+class CustomerServiceConfig(Base, TimestampMixin):
+    __tablename__ = "customer_service_configs"
     __table_args__ = (
         UniqueConstraint(
-            "municipality_id",
+            "customer_id",
             "service_id",
-            name="uq_municipality_service_configs_municipality_service",
+            name="uq_customer_service_configs_customer_service",
         ),
-        CheckConstraint("sale_price >= 0", name="ck_municipality_service_configs_non_negative_sale_price"),
+        CheckConstraint("sale_price >= 0", name="ck_customer_service_configs_non_negative_sale_price"),
         CheckConstraint(
             "support_price IS NULL OR support_price >= 0",
-            name="ck_municipality_service_configs_non_negative_support_price",
+            name="ck_customer_service_configs_non_negative_support_price",
         ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    municipality_id: Mapped[int] = mapped_column(
-        ForeignKey("municipalities.id", ondelete="RESTRICT"),
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )

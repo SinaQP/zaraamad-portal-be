@@ -6,10 +6,10 @@ from sqlalchemy.orm import Session
 from app.common.database import Base, get_db_session
 from app.common.enums import SortOrder, UserRole
 from app.common.messages import (
-    CUSTOMER_MUNICIPALITY_REQUIRED,
+    CUSTOMER_ID_REQUIRED,
     DATA_INTEGRITY_ERROR,
     MOBILE_ALREADY_EXISTS,
-    MUNICIPALITY_ID_INVALID_OR_INACTIVE,
+    CUSTOMER_ID_INVALID_OR_INACTIVE,
     USER_NOT_FOUND,
 )
 from app.common.pagination import PaginationMeta, PaginationParams
@@ -23,7 +23,7 @@ class UserQueryBuilder:
         "full_name": User.full_name,
         "mobile": User.mobile,
         "role": User.role,
-        "municipality_id": User.municipality_id,
+        "customer_id": User.customer_id,
         "is_active": User.is_active,
         "created_at": User.created_at,
         "updated_at": User.updated_at,
@@ -32,7 +32,7 @@ class UserQueryBuilder:
     def build_list_query(
         self,
         role: UserRole | None,
-        municipality_id: int | None,
+        customer_id: int | None,
         is_active: bool | None,
         search: str | None,
         sort_by: str,
@@ -41,8 +41,8 @@ class UserQueryBuilder:
         query = select(User)
         if role is not None:
             query = query.where(User.role == role)
-        if municipality_id is not None:
-            query = query.where(User.municipality_id == municipality_id)
+        if customer_id is not None:
+            query = query.where(User.customer_id == customer_id)
         if is_active is not None:
             query = query.where(User.is_active.is_(is_active))
         if search:
@@ -65,31 +65,31 @@ class UserRolePolicy:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
 
-    def resolve_municipality_id(
+    def resolve_customer_id(
         self,
         role: UserRole,
-        municipality_id: int | None,
+        customer_id: int | None,
     ) -> int | None:
         if role == UserRole.ADMIN:
             return None
-        if municipality_id is None:
+        if customer_id is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=CUSTOMER_MUNICIPALITY_REQUIRED,
+                detail=CUSTOMER_ID_REQUIRED,
             )
-        municipality_table = Base.metadata.tables["municipalities"]
-        municipality = self._db_session.execute(
-            select(municipality_table.c.id).where(
-                municipality_table.c.id == municipality_id,
-                municipality_table.c.is_active.is_(True),
+        customer_table = Base.metadata.tables["customers"]
+        customer = self._db_session.execute(
+            select(customer_table.c.id).where(
+                customer_table.c.id == customer_id,
+                customer_table.c.is_active.is_(True),
             )
         ).scalar_one_or_none()
-        if municipality is None:
+        if customer is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=MUNICIPALITY_ID_INVALID_OR_INACTIVE,
+                detail=CUSTOMER_ID_INVALID_OR_INACTIVE,
             )
-        return municipality_id
+        return customer_id
 
 
 class UserService:
@@ -99,15 +99,15 @@ class UserService:
         self._role_policy = UserRolePolicy(db_session=db_session)
 
     def create(self, dto: UserCreate) -> User:
-        municipality_id = self._role_policy.resolve_municipality_id(
+        customer_id = self._role_policy.resolve_customer_id(
             role=dto.role,
-            municipality_id=dto.municipality_id,
+            customer_id=dto.customer_id,
         )
         user = User(
             full_name=dto.full_name,
             mobile=dto.mobile,
             role=dto.role,
-            municipality_id=municipality_id,
+            customer_id=customer_id,
             is_active=True,
         )
         self._db_session.add(user)
@@ -122,7 +122,7 @@ class UserService:
     def list(
         self,
         role: UserRole | None,
-        municipality_id: int | None,
+        customer_id: int | None,
         is_active: bool | None,
         search: str | None,
         sort_by: str,
@@ -131,7 +131,7 @@ class UserService:
     ) -> tuple[list[User], PaginationMeta]:
         query = self._query_builder.build_list_query(
             role=role,
-            municipality_id=municipality_id,
+            customer_id=customer_id,
             is_active=is_active,
             search=search,
             sort_by=sort_by,
@@ -164,21 +164,21 @@ class UserService:
         user = self.get_or_404(user_id=user_id)
         update_data = dto.model_dump(exclude_unset=True)
         target_role = update_data.get("role", user.role)
-        raw_municipality_id = (
-            update_data["municipality_id"]
-            if "municipality_id" in update_data
-            else user.municipality_id
+        raw_customer_id = (
+            update_data["customer_id"]
+            if "customer_id" in update_data
+            else user.customer_id
         )
-        municipality_id = self._role_policy.resolve_municipality_id(
+        customer_id = self._role_policy.resolve_customer_id(
             role=target_role,
-            municipality_id=raw_municipality_id,
+            customer_id=raw_customer_id,
         )
         for field_name, field_value in update_data.items():
-            if field_name == "municipality_id":
+            if field_name == "customer_id":
                 continue
             setattr(user, field_name, field_value)
         user.role = target_role
-        user.municipality_id = municipality_id
+        user.customer_id = customer_id
         try:
             self._db_session.commit()
         except IntegrityError as exc:

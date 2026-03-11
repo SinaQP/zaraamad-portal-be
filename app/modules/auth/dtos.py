@@ -45,9 +45,9 @@ class AuthUserBase(MongoDTO):
     full_name: str = Field(..., description="User full name.", examples=["Ali Rezaei"])
     mobile: str = Field(..., description="Iranian mobile number.", examples=["09121234567"])
     role: UserRole = Field(..., description="User role.", examples=[UserRole.ADMIN])
-    municipality_id: int | None = Field(
+    customer_id: int | None = Field(
         default=None,
-        description="Municipality id for customer users.",
+        description="Customer id for customer users.",
         examples=[1],
     )
     is_active: bool = Field(..., description="User active status.", examples=[True])

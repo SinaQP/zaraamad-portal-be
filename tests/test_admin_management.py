@@ -2,8 +2,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
-from app.common.messages import ADMIN_ACCESS_REQUIRED, CUSTOMER_MUNICIPALITY_REQUIRED
-from app.modules.municipalities.schemas import Municipality
+from app.common.messages import ADMIN_ACCESS_REQUIRED, CUSTOMER_ID_REQUIRED, VALIDATION_ERROR_MESSAGE
+from app.modules.customers.schemas import Customer
 from app.modules.users.schemas import User
 
 
@@ -12,7 +12,7 @@ def _create_admin(db_session: Session) -> User:
         full_name="Main Admin",
         mobile="09120000000",
         role=UserRole.ADMIN,
-        municipality_id=None,
+        customer_id=None,
         is_active=True,
     )
     db_session.add(admin)
@@ -31,21 +31,21 @@ def _login(client: TestClient, mobile: str) -> str:
     return verify_response.json()["access_token"]
 
 
-def test_admin_can_manage_municipalities_and_users(client: TestClient, db_session: Session) -> None:
+def test_admin_can_manage_customers_and_users(client: TestClient, db_session: Session) -> None:
     admin = _create_admin(db_session=db_session)
     admin_token = _login(client=client, mobile=admin.mobile)
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
-    municipality_response = client.post(
-        "/municipalities",
+    customer_response = client.post(
+        "/customers",
         headers=admin_headers,
         json={
-            "name": "Tehran Municipality",
+            "name": "Tehran Customer",
             "grade": 1,
         },
     )
-    assert municipality_response.status_code == 201
-    municipality_id = municipality_response.json()["id"]
+    assert customer_response.status_code == 201
+    customer_id = customer_response.json()["id"]
 
     user_response = client.post(
         "/users",
@@ -54,7 +54,7 @@ def test_admin_can_manage_municipalities_and_users(client: TestClient, db_sessio
             "full_name": "Customer One",
             "mobile": "09121112233",
             "role": UserRole.CUSTOMER.value,
-            "municipality_id": municipality_id,
+            "customer_id": customer_id,
         },
     )
     assert user_response.status_code == 201
@@ -65,7 +65,7 @@ def test_admin_can_manage_municipalities_and_users(client: TestClient, db_sessio
         headers=admin_headers,
         params={
             "role": UserRole.CUSTOMER.value,
-            "municipality_id": municipality_id,
+            "customer_id": customer_id,
             "is_active": True,
         },
     )
@@ -86,15 +86,15 @@ def test_admin_can_manage_municipalities_and_users(client: TestClient, db_sessio
     assert deactivate_user_response.status_code == 200
     assert deactivate_user_response.json()["is_active"] is False
 
-    deactivate_municipality_response = client.delete(
-        f"/municipalities/{municipality_id}",
+    deactivate_customer_response = client.delete(
+        f"/customers/{customer_id}",
         headers=admin_headers,
     )
-    assert deactivate_municipality_response.status_code == 200
-    assert deactivate_municipality_response.json()["is_active"] is False
+    assert deactivate_customer_response.status_code == 200
+    assert deactivate_customer_response.json()["is_active"] is False
 
 
-def test_admin_cannot_create_customer_without_municipality(
+def test_admin_cannot_create_customer_without_customer_id(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -109,14 +109,16 @@ def test_admin_cannot_create_customer_without_municipality(
             "full_name": "Invalid Customer",
             "mobile": "09126667788",
             "role": UserRole.CUSTOMER.value,
-            "municipality_id": None,
+            "customer_id": None,
         },
     )
     assert response.status_code == 422
-    assert response.json()["detail"][0]["msg"] == CUSTOMER_MUNICIPALITY_REQUIRED
+    assert response.json()["message"] == VALIDATION_ERROR_MESSAGE
+    assert response.json()["detail"][0]["msg"] == CUSTOMER_ID_REQUIRED
+    assert response.json()["developer_message"] == "Request validation failed."
 
 
-def test_admin_can_create_admin_without_municipality(
+def test_admin_can_create_admin_without_customer_id(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -135,7 +137,7 @@ def test_admin_can_create_admin_without_municipality(
     )
     assert response.status_code == 201
     assert response.json()["role"] == UserRole.ADMIN.value
-    assert response.json()["municipality_id"] is None
+    assert response.json()["customer_id"] is None
 
 
 def test_users_list_supports_search_sort_and_pagination(
@@ -146,26 +148,26 @@ def test_users_list_supports_search_sort_and_pagination(
     admin_token = _login(client=client, mobile=admin.mobile)
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
-    municipality_response = client.post(
-        "/municipalities",
+    customer_response = client.post(
+        "/customers",
         headers=admin_headers,
-        json={"name": "Search Municipality", "grade": 2},
+        json={"name": "Search Customer", "grade": 2},
     )
-    assert municipality_response.status_code == 201
-    municipality_id = municipality_response.json()["id"]
+    assert customer_response.status_code == 201
+    customer_id = customer_response.json()["id"]
 
     create_payloads = [
         {
             "full_name": "Alpha Customer",
             "mobile": "09121110001",
             "role": UserRole.CUSTOMER.value,
-            "municipality_id": municipality_id,
+            "customer_id": customer_id,
         },
         {
             "full_name": "Gamma Customer",
             "mobile": "09121110002",
             "role": UserRole.CUSTOMER.value,
-            "municipality_id": municipality_id,
+            "customer_id": customer_id,
         },
         {
             "full_name": "Beta Admin",
@@ -209,7 +211,7 @@ def test_users_list_supports_search_sort_and_pagination(
     assert paged_response.headers["X-Total-Pages"] == "2"
 
 
-def test_municipalities_list_supports_search_sort_and_pagination(
+def test_customers_list_supports_search_sort_and_pagination(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -218,26 +220,26 @@ def test_municipalities_list_supports_search_sort_and_pagination(
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
     for payload in [
-        {"name": "Alpha Municipality", "grade": 1},
-        {"name": "Gamma Municipality", "grade": 3},
-        {"name": "Beta Municipality", "grade": 2},
+        {"name": "Alpha Customer", "grade": 1},
+        {"name": "Gamma Customer", "grade": 3},
+        {"name": "Beta Customer", "grade": 2},
     ]:
-        response = client.post("/municipalities", headers=admin_headers, json=payload)
+        response = client.post("/customers", headers=admin_headers, json=payload)
         assert response.status_code == 201
 
     search_response = client.get(
-        "/municipalities",
+        "/customers",
         headers=admin_headers,
         params={"search": "beta"},
     )
     assert search_response.status_code == 200
     search_items = search_response.json()
     assert len(search_items) == 1
-    assert search_items[0]["name"] == "Beta Municipality"
+    assert search_items[0]["name"] == "Beta Customer"
     assert search_response.headers["X-Total-Count"] == "1"
 
     paged_response = client.get(
-        "/municipalities",
+        "/customers",
         headers=admin_headers,
         params={
             "sort_by": "grade",
@@ -257,20 +259,20 @@ def test_municipalities_list_supports_search_sort_and_pagination(
 
 
 def test_customer_cannot_access_admin_endpoints(client: TestClient, db_session: Session) -> None:
-    municipality = Municipality(
-        name="Qom Municipality",
+    customer = Customer(
+        name="Qom Customer",
         grade=2,
         is_active=True,
     )
-    db_session.add(municipality)
+    db_session.add(customer)
     db_session.commit()
-    db_session.refresh(municipality)
+    db_session.refresh(customer)
 
     customer = User(
         full_name="Customer User",
         mobile="09123334455",
         role=UserRole.CUSTOMER,
-        municipality_id=municipality.id,
+        customer_id=customer.id,
         is_active=True,
     )
     db_session.add(customer)
@@ -281,7 +283,7 @@ def test_customer_cannot_access_admin_endpoints(client: TestClient, db_session: 
     customer_headers = {"Authorization": f"Bearer {customer_token}"}
 
     response = client.post(
-        "/municipalities",
+        "/customers",
         headers=customer_headers,
         json={
             "name": "Should Fail",
@@ -289,4 +291,7 @@ def test_customer_cannot_access_admin_endpoints(client: TestClient, db_session: 
         },
     )
     assert response.status_code == 403
+    assert response.json()["message"] == ADMIN_ACCESS_REQUIRED
     assert response.json()["detail"] == ADMIN_ACCESS_REQUIRED
+    assert response.json()["developer_message"] == "Authenticated user does not have admin role."
+

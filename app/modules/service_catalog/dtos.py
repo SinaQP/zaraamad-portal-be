@@ -113,9 +113,9 @@ class ServiceUpdate(MongoDTO):
     is_active: bool | None = Field(default=None, description="Service active status.", examples=[True])
 
 
-class MunicipalityServiceConfigBase(MongoDTO):
+class CustomerServiceConfigBase(MongoDTO):
     service_id: int = Field(..., description="Service id.", examples=[1])
-    is_enabled: bool = Field(..., description="Service enabled for municipality.", examples=[True])
+    is_enabled: bool = Field(..., description="Service enabled for customer.", examples=[True])
     sale_price: int = Field(..., ge=0, description="Sale price in smallest money unit.", examples=[5000000])
     support_price: int | None = Field(
         default=None,
@@ -126,12 +126,12 @@ class MunicipalityServiceConfigBase(MongoDTO):
     notes: str | None = Field(default=None, description="Optional notes.", examples=["Includes emergency support."])
 
 
-class MunicipalityServiceConfigCreate(MunicipalityServiceConfigBase):
+class CustomerServiceConfigCreate(CustomerServiceConfigBase):
     pass
 
 
-class MunicipalityServiceConfigOut(WithId, MunicipalityServiceConfigBase):
-    municipality_id: int = Field(..., description="Municipality id.", examples=[1])
+class CustomerServiceConfigOut(WithId, CustomerServiceConfigBase):
+    customer_id: int = Field(..., description="Customer id.", examples=[1])
     project_id: int = Field(..., description="Service project id.", examples=[1])
     project_name: str = Field(..., description="Service project name.", examples=["Digital Transformation"])
     group_id: int = Field(..., description="Service group id.", examples=[1])
@@ -144,41 +144,41 @@ class MunicipalityServiceConfigOut(WithId, MunicipalityServiceConfigBase):
     updated_at: datetime = Field(..., description="Last update timestamp.")
 
 
-class MunicipalityServiceConfigUpdate(MongoDTO):
-    is_enabled: bool | None = Field(default=None, description="Service enabled for municipality.", examples=[False])
+class CustomerServiceConfigUpdate(MongoDTO):
+    is_enabled: bool | None = Field(default=None, description="Service enabled for customer.", examples=[False])
     sale_price: int | None = Field(default=None, ge=0, description="Sale price in smallest money unit.", examples=[7000000])
     support_price: int | None = Field(default=None, ge=0, description="Support price in smallest money unit.", examples=[2000000])
     notes: str | None = Field(default=None, description="Optional notes.", examples=["Updated by admin."])
 
 
-class MunicipalityServiceConfigBulkUpsertBase(MongoDTO):
-    items: list[MunicipalityServiceConfigCreate] = Field(
+class CustomerServiceConfigBulkUpsertBase(MongoDTO):
+    items: list[CustomerServiceConfigCreate] = Field(
         ...,
-        description="Bulk upsert items for municipality-service configurations.",
+        description="Bulk upsert items for customer-service configurations.",
     )
 
     @model_validator(mode="after")
-    def validate_non_empty_items(self) -> "MunicipalityServiceConfigBulkUpsertBase":
+    def validate_non_empty_items(self) -> "CustomerServiceConfigBulkUpsertBase":
         if len(self.items) == 0:
             raise ValueError(ITEMS_MUST_NOT_BE_EMPTY)
         return self
 
 
-class MunicipalityServiceConfigBulkUpsertCreate(MunicipalityServiceConfigBulkUpsertBase):
+class CustomerServiceConfigBulkUpsertCreate(CustomerServiceConfigBulkUpsertBase):
     pass
 
 
-class MunicipalityPricingSummaryMunicipality(MongoDTO):
-    id: int = Field(..., description="Municipality id.", examples=[1])
-    name: str = Field(..., description="Municipality name.", examples=["Tehran Municipality"])
-    grade: int = Field(..., description="Municipality grade.", examples=[1])
+class CustomerPricingSummaryCustomer(MongoDTO):
+    id: int = Field(..., description="Customer id.", examples=[1])
+    name: str = Field(..., description="Customer name.", examples=["Tehran Customer"])
+    grade: int = Field(..., description="Customer grade.", examples=[1])
 
 
-class MunicipalityPricingSummaryItem(MongoDTO):
+class CustomerPricingSummaryItem(MongoDTO):
     service_id: int = Field(..., description="Service id.", examples=[1])
     service_code: str = Field(..., description="Service code.", examples=["camera-monitoring"])
     service_name: str = Field(..., description="Service name.", examples=["Camera Monitoring"])
-    is_enabled: bool = Field(..., description="Enabled state for municipality.", examples=[True])
+    is_enabled: bool = Field(..., description="Enabled state for customer.", examples=[True])
     sale_price: int = Field(..., description="Configured sale price.", examples=[5000000])
     support_price: int | None = Field(default=None, description="Configured support price.", examples=[1500000])
     line_sale_total: int = Field(..., description="Line sale total.", examples=[5000000])
@@ -186,29 +186,29 @@ class MunicipalityPricingSummaryItem(MongoDTO):
     line_grand_total: int = Field(..., description="Line grand total.", examples=[6500000])
 
 
-class MunicipalityPricingSummaryGroupTotals(MongoDTO):
+class CustomerPricingSummaryGroupTotals(MongoDTO):
     sale_total: int = Field(..., description="Group sale total.", examples=[5000000])
     support_total: int = Field(..., description="Group support total.", examples=[1500000])
     grand_total: int = Field(..., description="Group grand total.", examples=[6500000])
 
 
-class MunicipalityPricingSummaryGroup(MongoDTO):
+class CustomerPricingSummaryGroup(MongoDTO):
     project_id: int = Field(..., description="Service project id.", examples=[1])
     project_name: str = Field(..., description="Service project name.", examples=["Digital Transformation"])
     group_id: int = Field(..., description="Service group id.", examples=[1])
     group_code: str = Field(..., description="Service group code.", examples=["security"])
     group_name: str = Field(..., description="Service group name.", examples=["Security"])
-    items: list[MunicipalityPricingSummaryItem] = Field(..., description="Group items.")
-    totals: MunicipalityPricingSummaryGroupTotals = Field(..., description="Group totals.")
+    items: list[CustomerPricingSummaryItem] = Field(..., description="Group items.")
+    totals: CustomerPricingSummaryGroupTotals = Field(..., description="Group totals.")
 
 
-class MunicipalityPricingSummaryTotals(MongoDTO):
+class CustomerPricingSummaryTotals(MongoDTO):
     sale_total: int = Field(..., description="Overall sale total.", examples=[12000000])
     support_total: int = Field(..., description="Overall support total.", examples=[3000000])
     grand_total: int = Field(..., description="Overall grand total.", examples=[15000000])
 
 
-class MunicipalityPricingSummaryResult(MongoDTO):
-    municipality: MunicipalityPricingSummaryMunicipality = Field(..., description="Municipality information.")
-    groups: list[MunicipalityPricingSummaryGroup] = Field(..., description="Services grouped by service group.")
-    totals: MunicipalityPricingSummaryTotals = Field(..., description="Overall pricing totals.")
+class CustomerPricingSummaryResult(MongoDTO):
+    customer: CustomerPricingSummaryCustomer = Field(..., description="Customer information.")
+    groups: list[CustomerPricingSummaryGroup] = Field(..., description="Services grouped by service group.")
+    totals: CustomerPricingSummaryTotals = Field(..., description="Overall pricing totals.")

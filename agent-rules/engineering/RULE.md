@@ -24,6 +24,8 @@ globs: ["app/**/*.py"]
 - Every runtime message returned to frontend clients MUST be Persian.
 - This applies to success payload messages, `HTTPException.detail`, and validation error texts.
 - Do not introduce new English user-facing messages in API responses.
+- User-facing messages must be understandable for non-technical users and must not expose raw field names like `customer_id`, `project_id`, or similar implementation details.
+- Error responses must also include a separate developer-oriented explanation so frontend/backend developers can diagnose the failure without relying on the user-facing text.
 
 ## Scope control (mandatory)
 - Do NOT create new endpoints, routes, modules, background jobs, or extra features unless explicitly requested by the user.

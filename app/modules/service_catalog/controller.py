@@ -6,10 +6,10 @@ from app.common.enums import SortOrder
 from app.common.pagination import PaginationParams, set_pagination_headers
 from app.common.security.dependencies import require_admin
 from app.modules.service_catalog.dtos import (
-    MunicipalityPricingSummaryResult,
-    MunicipalityServiceConfigBulkUpsertCreate,
-    MunicipalityServiceConfigOut,
-    MunicipalityServiceConfigUpdate,
+    CustomerPricingSummaryResult,
+    CustomerServiceConfigBulkUpsertCreate,
+    CustomerServiceConfigOut,
+    CustomerServiceConfigUpdate,
     ServiceCreate,
     ServiceGroupCreate,
     ServiceGroupOut,
@@ -22,13 +22,13 @@ from app.modules.service_catalog.dtos import (
 )
 from app.modules.service_catalog.mappers import ServiceCatalogMapper, get_service_catalog_mapper
 from app.modules.service_catalog.service import (
-    MunicipalityPricingSummaryService,
-    MunicipalityServiceConfigService,
+    CustomerPricingSummaryService,
+    CustomerServiceConfigService,
     ServiceCatalogService,
     ServiceGroupService,
     ServiceProjectService,
-    get_municipality_pricing_summary_service,
-    get_municipality_service_config_service,
+    get_customer_pricing_summary_service,
+    get_customer_service_config_service,
     get_service_catalog_service,
     get_service_group_service,
     get_service_project_service,
@@ -432,19 +432,19 @@ def deactivate_service(
 
 
 @router.get(
-    "/municipalities/{municipality_id}/services",
-    response_model=list[MunicipalityServiceConfigOut],
-    summary="List municipality service configs",
-    description="Return all configured services for a municipality with project, group, price, and enabled status.",
+    "/customers/{customer_id}/services",
+    response_model=list[CustomerServiceConfigOut],
+    summary="List customer service configs",
+    description="Return all configured services for a customer with project, group, price, and enabled status.",
     responses={
-        200: {"description": "Municipality service configs returned."},
+        200: {"description": "Customer service configs returned."},
         403: {"description": "Admin access required."},
-        404: {"description": "Municipality not found."},
+        404: {"description": "Customer not found."},
     },
 )
-def list_municipality_services(
+def list_customer_services(
     response: Response,
-    municipality_id: int,
+    customer_id: int,
     project_id: int | None = Query(default=None, description="Filter by service project id."),
     is_enabled: bool | None = Query(default=None, description="Filter by enabled state."),
     search: str | None = Query(default=None, description="Search by project name or group/service code, name, or notes."),
@@ -470,11 +470,11 @@ def list_municipality_services(
     page: int = Query(default=1, ge=1, description="Page number (1-based)."),
     page_size: int = Query(default=20, ge=1, le=100, description="Page size."),
     _: object = Depends(require_admin),
-    service: MunicipalityServiceConfigService = Depends(get_municipality_service_config_service),
+    service: CustomerServiceConfigService = Depends(get_customer_service_config_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
-) -> list[MunicipalityServiceConfigOut]:
-    rows, meta = service.list_by_municipality(
-        municipality_id=municipality_id,
+) -> list[CustomerServiceConfigOut]:
+    rows, meta = service.list_by_customer(
+        customer_id=customer_id,
         project_id=project_id,
         is_enabled=is_enabled,
         search=search,
@@ -484,78 +484,78 @@ def list_municipality_services(
     )
     set_pagination_headers(response=response, meta=meta)
     return [
-        mapper.to_municipality_config_out(config=config, service=service_item, group=group, project=project)
+        mapper.to_customer_config_out(config=config, service=service_item, group=group, project=project)
         for config, service_item, group, project in rows
     ]
 
 
 @router.put(
-    "/municipalities/{municipality_id}/services",
-    response_model=list[MunicipalityServiceConfigOut],
-    summary="Bulk upsert municipality service configs",
+    "/customers/{customer_id}/services",
+    response_model=list[CustomerServiceConfigOut],
+    summary="Bulk upsert customer service configs",
     description=(
-        "Bulk upsert service configurations for a municipality by service_id. "
+        "Bulk upsert service configurations for a customer by service_id. "
         "Items omitted from payload remain unchanged."
     ),
     responses={
-        200: {"description": "Municipality service configs upserted."},
+        200: {"description": "Customer service configs upserted."},
         403: {"description": "Admin access required."},
-        404: {"description": "Municipality not found."},
-        409: {"description": "Duplicate municipality/service configuration is not allowed."},
+        404: {"description": "Customer not found."},
+        409: {"description": "Duplicate customer/service configuration is not allowed."},
         422: {"description": "Payload validation failed."},
     },
 )
-def bulk_upsert_municipality_services(
-    municipality_id: int,
-    payload: MunicipalityServiceConfigBulkUpsertCreate,
+def bulk_upsert_customer_services(
+    customer_id: int,
+    payload: CustomerServiceConfigBulkUpsertCreate,
     _: object = Depends(require_admin),
-    service: MunicipalityServiceConfigService = Depends(get_municipality_service_config_service),
+    service: CustomerServiceConfigService = Depends(get_customer_service_config_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
-) -> list[MunicipalityServiceConfigOut]:
-    rows = service.bulk_upsert(municipality_id=municipality_id, dto=payload)
+) -> list[CustomerServiceConfigOut]:
+    rows = service.bulk_upsert(customer_id=customer_id, dto=payload)
     return [
-        mapper.to_municipality_config_out(config=config, service=service_item, group=group, project=project)
+        mapper.to_customer_config_out(config=config, service=service_item, group=group, project=project)
         for config, service_item, group, project in rows
     ]
 
 
 @router.patch(
-    "/municipality-service-configs/{config_id}",
-    response_model=MunicipalityServiceConfigOut,
-    summary="Update municipality service config",
-    description="Update a single municipality service config row by id.",
+    "/customer-service-configs/{config_id}",
+    response_model=CustomerServiceConfigOut,
+    summary="Update customer service config",
+    description="Update a single customer service config row by id.",
     responses={
-        200: {"description": "Municipality service config updated."},
+        200: {"description": "Customer service config updated."},
         403: {"description": "Admin access required."},
-        404: {"description": "Municipality service config not found."},
+        404: {"description": "Customer service config not found."},
         422: {"description": "Payload validation failed."},
     },
 )
-def update_municipality_service_config(
+def update_customer_service_config(
     config_id: int,
-    payload: MunicipalityServiceConfigUpdate,
+    payload: CustomerServiceConfigUpdate,
     _: object = Depends(require_admin),
-    service: MunicipalityServiceConfigService = Depends(get_municipality_service_config_service),
+    service: CustomerServiceConfigService = Depends(get_customer_service_config_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
-) -> MunicipalityServiceConfigOut:
+) -> CustomerServiceConfigOut:
     config, service_item, group, project = service.update_single(config_id=config_id, dto=payload)
-    return mapper.to_municipality_config_out(config=config, service=service_item, group=group, project=project)
+    return mapper.to_customer_config_out(config=config, service=service_item, group=group, project=project)
 
 
 @router.get(
-    "/municipalities/{municipality_id}/pricing-summary",
-    response_model=MunicipalityPricingSummaryResult,
-    summary="Get municipality pricing summary",
-    description="Return municipality service configuration and aggregate totals for pricing.",
+    "/customers/{customer_id}/pricing-summary",
+    response_model=CustomerPricingSummaryResult,
+    summary="Get customer pricing summary",
+    description="Return customer service configuration and aggregate totals for pricing.",
     responses={
-        200: {"description": "Municipality pricing summary returned."},
+        200: {"description": "Customer pricing summary returned."},
         403: {"description": "Admin access required."},
-        404: {"description": "Municipality not found."},
+        404: {"description": "Customer not found."},
     },
 )
-def get_municipality_pricing_summary(
-    municipality_id: int,
+def get_customer_pricing_summary(
+    customer_id: int,
     _: object = Depends(require_admin),
-    service: MunicipalityPricingSummaryService = Depends(get_municipality_pricing_summary_service),
-) -> MunicipalityPricingSummaryResult:
-    return service.get_summary(municipality_id=municipality_id)
+    service: CustomerPricingSummaryService = Depends(get_customer_pricing_summary_service),
+) -> CustomerPricingSummaryResult:
+    return service.get_summary(customer_id=customer_id)

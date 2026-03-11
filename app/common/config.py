@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     otp_request_limit_count: int = 3
     otp_request_limit_window_seconds: int = 600
     otp_dev_mode: bool = True
+    sms_api_url: str = "https://payamsms.com/services/rest/index.php"
+    sms_request_timeout_seconds: int = 15
+    sms_panel_organization: str | None = None
+    sms_panel_username: str | None = None
+    sms_panel_password: str | None = None
+    sms_panel_sender: str = "9820002739006"
     seed_admin_full_name: str = "System Admin"
     seed_admin_mobile: str = "09120000000"
     cors_allowed_origins: list[str] = []
