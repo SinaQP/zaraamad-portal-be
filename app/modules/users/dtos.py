@@ -42,6 +42,11 @@ class UserOut(WithId, UserBase):
     updated_at: datetime = Field(..., description="Last update timestamp.")
 
 
+class UserListOut(MongoDTO):
+    items: list[UserOut] = Field(..., description="List of users for the current page.")
+    total_page: int = Field(..., description="Total number of pages.", examples=[3])
+
+
 class UserUpdate(MongoDTO):
     full_name: str | None = Field(default=None, description="User full name.", examples=["Sara Ahmadi"])
     mobile: str | None = Field(default=None, description="Iranian mobile number.", examples=["09125556677"])

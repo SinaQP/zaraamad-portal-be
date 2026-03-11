@@ -9,6 +9,7 @@ from app.modules.customers.dtos import (
     CustomerBridgeCapabilitiesOut,
     CustomerBridgeHealthOut,
     CustomerCreate,
+    CustomerListOut,
     CustomerOut,
     CustomerUpdate,
 )
@@ -47,7 +48,7 @@ def create_customer(
 
 @router.get(
     "",
-    response_model=list[CustomerOut],
+    response_model=CustomerListOut,
     summary="List customers",
     description="Return customers with optional active-state filtering.",
     responses={
@@ -69,7 +70,7 @@ def list_customers(
     _: object = Depends(require_admin),
     service: CustomerService = Depends(get_customer_service),
     mapper: CustomerMapper = Depends(get_customer_mapper),
-) -> list[CustomerOut]:
+) -> CustomerListOut:
     customers, meta = service.list(
         is_active=is_active,
         search=search,
@@ -78,7 +79,10 @@ def list_customers(
         pagination=PaginationParams(page=page, page_size=page_size),
     )
     set_pagination_headers(response=response, meta=meta)
-    return [mapper.to_out(customer=item) for item in customers]
+    return CustomerListOut(
+        items=[mapper.to_out(customer=item) for item in customers],
+        total_page=meta.total_pages,
+    )
 
 
 @router.get(

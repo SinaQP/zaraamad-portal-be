@@ -62,6 +62,11 @@ class CustomerOut(WithId, CustomerBase, CustomerBridgeConfigBase):
     updated_at: datetime = Field(..., description="Last update timestamp.")
 
 
+class CustomerListOut(MongoDTO):
+    items: list[CustomerOut] = Field(..., description="List of customers for the current page.")
+    total_page: int = Field(..., description="Total number of pages.", examples=[3])
+
+
 class CustomerUpdate(CustomerBridgeConfigInput):
     name: str | None = Field(default=None, description="Customer name.", examples=["Qom Customer"])
     grade: int | None = Field(default=None, description="Customer grade.", examples=[2])

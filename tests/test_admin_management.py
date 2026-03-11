@@ -71,8 +71,9 @@ def test_admin_can_manage_customers_and_users(client: TestClient, db_session: Se
     )
     assert filtered_users_response.status_code == 200
     filtered_users = filtered_users_response.json()
-    assert len(filtered_users) == 1
-    assert filtered_users[0]["id"] == user_id
+    assert filtered_users["total_page"] == 1
+    assert len(filtered_users["items"]) == 1
+    assert filtered_users["items"][0]["id"] == user_id
 
     patch_response = client.patch(
         f"/users/{user_id}",
@@ -186,8 +187,9 @@ def test_users_list_supports_search_sort_and_pagination(
     )
     assert search_response.status_code == 200
     search_items = search_response.json()
-    assert len(search_items) == 1
-    assert search_items[0]["full_name"] == "Alpha Customer"
+    assert search_items["total_page"] == 1
+    assert len(search_items["items"]) == 1
+    assert search_items["items"][0]["full_name"] == "Alpha Customer"
     assert search_response.headers["X-Total-Count"] == "1"
 
     paged_response = client.get(
@@ -202,9 +204,10 @@ def test_users_list_supports_search_sort_and_pagination(
     )
     assert paged_response.status_code == 200
     paged_items = paged_response.json()
-    assert len(paged_items) == 2
-    assert paged_items[0]["full_name"] == "Alpha Customer"
-    assert paged_items[1]["full_name"] == "Beta Admin"
+    assert paged_items["total_page"] == 2
+    assert len(paged_items["items"]) == 2
+    assert paged_items["items"][0]["full_name"] == "Alpha Customer"
+    assert paged_items["items"][1]["full_name"] == "Beta Admin"
     assert paged_response.headers["X-Total-Count"] == "4"
     assert paged_response.headers["X-Page"] == "1"
     assert paged_response.headers["X-Page-Size"] == "2"
@@ -234,8 +237,9 @@ def test_customers_list_supports_search_sort_and_pagination(
     )
     assert search_response.status_code == 200
     search_items = search_response.json()
-    assert len(search_items) == 1
-    assert search_items[0]["name"] == "Beta Customer"
+    assert search_items["total_page"] == 1
+    assert len(search_items["items"]) == 1
+    assert search_items["items"][0]["name"] == "Beta Customer"
     assert search_response.headers["X-Total-Count"] == "1"
 
     paged_response = client.get(
@@ -250,8 +254,9 @@ def test_customers_list_supports_search_sort_and_pagination(
     )
     assert paged_response.status_code == 200
     paged_items = paged_response.json()
-    assert len(paged_items) == 1
-    assert paged_items[0]["grade"] == 1
+    assert paged_items["total_page"] == 2
+    assert len(paged_items["items"]) == 1
+    assert paged_items["items"][0]["grade"] == 1
     assert paged_response.headers["X-Total-Count"] == "3"
     assert paged_response.headers["X-Page"] == "2"
     assert paged_response.headers["X-Page-Size"] == "2"

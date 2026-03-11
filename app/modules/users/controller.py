@@ -6,7 +6,7 @@ from app.common.enums import UserRole
 from app.common.enums import SortOrder
 from app.common.pagination import PaginationParams, set_pagination_headers
 from app.common.security.dependencies import require_admin
-from app.modules.users.dtos import UserCreate, UserOut, UserUpdate
+from app.modules.users.dtos import UserCreate, UserListOut, UserOut, UserUpdate
 from app.modules.users.mappers import UserMapper, get_user_mapper
 from app.modules.users.service import UserService, get_user_service
 
@@ -38,7 +38,7 @@ def create_user(
 
 @router.get(
     "",
-    response_model=list[UserOut],
+    response_model=UserListOut,
     summary="List users",
     description="Return users with optional role, customer, and active-state filters.",
     responses={
@@ -68,7 +68,7 @@ def list_users(
     _: object = Depends(require_admin),
     service: UserService = Depends(get_user_service),
     mapper: UserMapper = Depends(get_user_mapper),
-) -> list[UserOut]:
+) -> UserListOut:
     users, meta = service.list(
         role=role,
         customer_id=customer_id,
@@ -79,7 +79,10 @@ def list_users(
         pagination=PaginationParams(page=page, page_size=page_size),
     )
     set_pagination_headers(response=response, meta=meta)
-    return [mapper.to_out(user=item) for item in users]
+    return UserListOut(
+        items=[mapper.to_out(user=item) for item in users],
+        total_page=meta.total_pages,
+    )
 
 
 @router.get(
