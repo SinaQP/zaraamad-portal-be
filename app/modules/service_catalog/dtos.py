@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import Field, model_validator
 
 from app.common.dtos import MongoDTO, WithId
+from app.common.messages import ITEMS_MUST_NOT_BE_EMPTY
 
 
 class ServiceProjectBase(MongoDTO):
@@ -159,7 +160,7 @@ class MunicipalityServiceConfigBulkUpsertBase(MongoDTO):
     @model_validator(mode="after")
     def validate_non_empty_items(self) -> "MunicipalityServiceConfigBulkUpsertBase":
         if len(self.items) == 0:
-            raise ValueError("items must not be empty.")
+            raise ValueError(ITEMS_MUST_NOT_BE_EMPTY)
         return self
 
 

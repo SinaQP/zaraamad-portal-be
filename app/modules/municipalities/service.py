@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.common.database import get_db_session
 from app.common.enums import SortOrder
+from app.common.messages import DATA_INTEGRITY_ERROR, MUNICIPALITY_NOT_FOUND
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.modules.municipalities.dtos import MunicipalityCreate, MunicipalityUpdate
 from app.modules.municipalities.schemas import Municipality
@@ -58,7 +59,7 @@ class MunicipalityService:
             self._db_session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Data integrity error.",
+                detail=DATA_INTEGRITY_ERROR,
             ) from exc
         self._db_session.refresh(municipality)
         return municipality
@@ -96,7 +97,7 @@ class MunicipalityService:
         if municipality is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Municipality not found.",
+                detail=MUNICIPALITY_NOT_FOUND,
             )
         return municipality
 
@@ -111,7 +112,7 @@ class MunicipalityService:
             self._db_session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Data integrity error.",
+                detail=DATA_INTEGRITY_ERROR,
             ) from exc
         self._db_session.refresh(municipality)
         return municipality

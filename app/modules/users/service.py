@@ -5,6 +5,13 @@ from sqlalchemy.orm import Session
 
 from app.common.database import Base, get_db_session
 from app.common.enums import SortOrder, UserRole
+from app.common.messages import (
+    CUSTOMER_MUNICIPALITY_REQUIRED,
+    DATA_INTEGRITY_ERROR,
+    MOBILE_ALREADY_EXISTS,
+    MUNICIPALITY_ID_INVALID_OR_INACTIVE,
+    USER_NOT_FOUND,
+)
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.modules.users.dtos import UserCreate, UserUpdate
 from app.modules.users.schemas import User
@@ -68,7 +75,7 @@ class UserRolePolicy:
         if municipality_id is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="municipality_id is required for customer users.",
+                detail=CUSTOMER_MUNICIPALITY_REQUIRED,
             )
         municipality_table = Base.metadata.tables["municipalities"]
         municipality = self._db_session.execute(
@@ -80,7 +87,7 @@ class UserRolePolicy:
         if municipality is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="municipality_id is invalid or inactive.",
+                detail=MUNICIPALITY_ID_INVALID_OR_INACTIVE,
             )
         return municipality_id
 
@@ -149,7 +156,7 @@ class UserService:
         if user is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found.",
+                detail=USER_NOT_FOUND,
             )
         return user
 
@@ -192,11 +199,11 @@ class UserService:
         if "mobile" in error_text:
             return HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Mobile number already exists.",
+                detail=MOBILE_ALREADY_EXISTS,
             )
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Data integrity error.",
+            detail=DATA_INTEGRITY_ERROR,
         )
 
 

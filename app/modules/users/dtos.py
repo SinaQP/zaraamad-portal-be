@@ -4,6 +4,7 @@ from pydantic import Field, field_validator, model_validator
 
 from app.common.dtos import MongoDTO, WithId
 from app.common.enums import UserRole
+from app.common.messages import CUSTOMER_MUNICIPALITY_REQUIRED
 from app.common.validators.mobile_validator import get_mobile_validator
 
 
@@ -25,7 +26,7 @@ class UserBase(MongoDTO):
     @model_validator(mode="after")
     def validate_role_constraints(self) -> "UserBase":
         if self.role == UserRole.CUSTOMER and self.municipality_id is None:
-            raise ValueError("municipality_id is required for customer users.")
+            raise ValueError(CUSTOMER_MUNICIPALITY_REQUIRED)
         if self.role == UserRole.ADMIN:
             self.municipality_id = None
         return self

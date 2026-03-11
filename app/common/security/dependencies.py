@@ -6,6 +6,14 @@ from sqlalchemy.orm import Session
 from app.common.database import Base, get_db_session
 from app.common.dtos import CurrentUser
 from app.common.enums import UserRole
+from app.common.messages import (
+    ADMIN_ACCESS_REQUIRED,
+    MISSING_AUTH_TOKEN,
+    TOKEN_SUBJECT_INVALID,
+    TOKEN_SUBJECT_MISSING,
+    USER_INACTIVE,
+    USER_NOT_FOUND,
+)
 from app.common.security.jwt_service import JWTService, get_jwt_service
 
 bearer_scheme = HTTPBearer(
@@ -30,14 +38,14 @@ class CurrentUserResolver:
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token subject is missing.",
+                detail=TOKEN_SUBJECT_MISSING,
             )
         try:
             parsed_user_id = int(user_id)
         except (TypeError, ValueError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token subject is invalid.",
+                detail=TOKEN_SUBJECT_INVALID,
             ) from exc
         user_table = Base.metadata.tables["users"]
         row = db_session.execute(
@@ -53,12 +61,12 @@ class CurrentUserResolver:
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found.",
+                detail=USER_NOT_FOUND,
             )
         if not row["is_active"]:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User is inactive.",
+                detail=USER_INACTIVE,
             )
         return CurrentUser(
             id=row["id"],
@@ -84,7 +92,7 @@ def get_current_user(
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing authentication token.",
+            detail=MISSING_AUTH_TOKEN,
         )
     token = credentials.credentials
     return resolver.resolve(token=token, db_session=db_session)
@@ -94,6 +102,6 @@ def require_admin(current_user: CurrentUser = Depends(get_current_user)) -> Curr
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required.",
+            detail=ADMIN_ACCESS_REQUIRED,
         )
     return current_user

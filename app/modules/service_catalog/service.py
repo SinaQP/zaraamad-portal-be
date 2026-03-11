@@ -5,6 +5,23 @@ from sqlalchemy.orm import Session
 
 from app.common.database import Base, get_db_session
 from app.common.enums import SortOrder
+from app.common.messages import (
+    DATA_INTEGRITY_ERROR,
+    DUPLICATE_MUNICIPALITY_SERVICE_CONFIGURATION,
+    DUPLICATE_SERVICE_ID_IN_PAYLOAD,
+    GROUP_ID_CANNOT_BE_NULL,
+    GROUP_ID_INVALID,
+    INACTIVE_SERVICE_CANNOT_BE_ASSIGNED,
+    MUNICIPALITY_NOT_FOUND,
+    MUNICIPALITY_SERVICE_CONFIG_NOT_FOUND,
+    PROJECT_ID_CANNOT_BE_NULL,
+    PROJECT_ID_INVALID,
+    SALE_PRICE_CANNOT_BE_NULL,
+    SERVICE_GROUP_NOT_FOUND,
+    SERVICE_ID_INVALID,
+    SERVICE_NOT_FOUND,
+    SERVICE_PROJECT_NOT_FOUND,
+)
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.modules.service_catalog.dtos import (
     MunicipalityPricingSummaryGroup,
@@ -42,7 +59,7 @@ class MunicipalityLookupService:
         if municipality_row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Municipality not found.",
+                detail=MUNICIPALITY_NOT_FOUND,
             )
         return {
             "id": municipality_row["id"],
@@ -258,7 +275,7 @@ class ServiceProjectService:
         if project is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Service project not found.",
+                detail=SERVICE_PROJECT_NOT_FOUND,
             )
         return project
 
@@ -285,7 +302,7 @@ class ServiceProjectService:
             self._db_session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Data integrity error.",
+                detail=DATA_INTEGRITY_ERROR,
             ) from exc
 
 
@@ -349,7 +366,7 @@ class ServiceGroupService:
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Service group not found.",
+                detail=SERVICE_GROUP_NOT_FOUND,
             )
         return row[0], row[1]
 
@@ -361,7 +378,7 @@ class ServiceGroupService:
             if project_id is None:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail="project_id cannot be null.",
+                    detail=PROJECT_ID_CANNOT_BE_NULL,
                 )
             self._get_project_or_422(project_id=project_id)
         for field_name, field_value in update_data.items():
@@ -382,7 +399,7 @@ class ServiceGroupService:
         if project is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="project_id is invalid.",
+                detail=PROJECT_ID_INVALID,
             )
         return project
 
@@ -393,7 +410,7 @@ class ServiceGroupService:
             self._db_session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Data integrity error.",
+                detail=DATA_INTEGRITY_ERROR,
             ) from exc
 
 
@@ -460,7 +477,7 @@ class ServiceCatalogService:
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Service not found.",
+                detail=SERVICE_NOT_FOUND,
             )
         return row[0], row[1], row[2]
 
@@ -472,7 +489,7 @@ class ServiceCatalogService:
             if group_id is None:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail="group_id cannot be null.",
+                    detail=GROUP_ID_CANNOT_BE_NULL,
                 )
             self._get_group_with_project_or_422(group_id=group_id)
         for field_name, field_value in update_data.items():
@@ -497,7 +514,7 @@ class ServiceCatalogService:
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="group_id is invalid.",
+                detail=GROUP_ID_INVALID,
             )
         return row[0], row[1]
 
@@ -508,7 +525,7 @@ class ServiceCatalogService:
             self._db_session.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Data integrity error.",
+                detail=DATA_INTEGRITY_ERROR,
             ) from exc
 
 
@@ -593,7 +610,7 @@ class MunicipalityServiceConfigPolicy:
         if len(service_ids) != len(set(service_ids)):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Duplicate service_id in payload is not allowed.",
+                detail=DUPLICATE_SERVICE_ID_IN_PAYLOAD,
             )
 
     def get_service_map(self, service_ids: list[int]) -> dict[int, Service]:
@@ -623,12 +640,12 @@ class MunicipalityServiceConfigPolicy:
         if service is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="service_id is invalid.",
+                detail=SERVICE_ID_INVALID,
             )
         if not service.is_active:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Inactive service cannot be assigned in new config.",
+                detail=INACTIVE_SERVICE_CANNOT_BE_ASSIGNED,
             )
 
 
@@ -720,13 +737,13 @@ class MunicipalityServiceConfigService:
         if config is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Municipality service config not found.",
+                detail=MUNICIPALITY_SERVICE_CONFIG_NOT_FOUND,
             )
         update_data = dto.model_dump(exclude_unset=True, exclude_none=False)
         if "sale_price" in update_data and update_data["sale_price"] is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="sale_price cannot be null.",
+                detail=SALE_PRICE_CANNOT_BE_NULL,
             )
         for field_name, field_value in update_data.items():
             setattr(config, field_name, field_value)
@@ -742,7 +759,7 @@ class MunicipalityServiceConfigService:
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Municipality service config not found.",
+                detail=MUNICIPALITY_SERVICE_CONFIG_NOT_FOUND,
             )
         return row[0], row[1], row[2], row[3]
 
@@ -771,11 +788,11 @@ class MunicipalityServiceConfigService:
             if "municipality_service_configs" in error_text or "service_id" in error_text:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="Duplicate municipality/service configuration is not allowed.",
+                    detail=DUPLICATE_MUNICIPALITY_SERVICE_CONFIGURATION,
                 ) from exc
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Data integrity error.",
+                detail=DATA_INTEGRITY_ERROR,
             ) from exc
 
 

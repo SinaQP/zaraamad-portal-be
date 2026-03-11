@@ -1,4 +1,5 @@
 from app.common.config import get_settings
+from app.common.messages import OTP_GENERATED_TEMPLATE
 
 
 class OTPDeliveryResult:
@@ -19,10 +20,10 @@ class MockOTPProvider(OTPProvider):
     def send_login_otp(self, mobile: str, otp_code: str) -> OTPDeliveryResult:
         if self._dev_mode:
             return OTPDeliveryResult(
-                message=f"OTP generated for {mobile}.",
+                message=OTP_GENERATED_TEMPLATE.format(mobile=mobile),
                 dev_otp=otp_code,
             )
-        return OTPDeliveryResult(message=f"OTP generated for {mobile}.")
+        return OTPDeliveryResult(message=OTP_GENERATED_TEMPLATE.format(mobile=mobile))
 
 
 def get_otp_provider() -> OTPProvider:

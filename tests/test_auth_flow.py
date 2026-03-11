@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
+from app.common.messages import INVALID_IRANIAN_MOBILE, OTP_INVALID, USER_NOT_FOUND_OR_INACTIVE
 from app.modules.users.schemas import User
 
 
@@ -25,6 +26,7 @@ def test_request_otp_for_unknown_user_returns_404(client: TestClient) -> None:
         json={"mobile": "09125554433"},
     )
     assert response.status_code == 404
+    assert response.json()["detail"] == USER_NOT_FOUND_OR_INACTIVE
 
 
 def test_admin_can_login_with_otp_and_get_me(client: TestClient, db_session: Session) -> None:
@@ -77,3 +79,14 @@ def test_otp_is_single_use(client: TestClient, db_session: Session) -> None:
         json={"mobile": admin.mobile, "otp_code": otp_code},
     )
     assert second_verify.status_code == 400
+    assert second_verify.json()["detail"] == OTP_INVALID
+
+
+def test_invalid_mobile_returns_persian_validation_message(client: TestClient) -> None:
+    response = client.post(
+        "/auth/request-otp",
+        json={"mobile": "0912"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == INVALID_IRANIAN_MOBILE

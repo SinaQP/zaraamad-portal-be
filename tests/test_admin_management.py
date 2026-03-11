@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
+from app.common.messages import ADMIN_ACCESS_REQUIRED, CUSTOMER_MUNICIPALITY_REQUIRED
 from app.modules.municipalities.schemas import Municipality
 from app.modules.users.schemas import User
 
@@ -112,6 +113,7 @@ def test_admin_cannot_create_customer_without_municipality(
         },
     )
     assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == CUSTOMER_MUNICIPALITY_REQUIRED
 
 
 def test_admin_can_create_admin_without_municipality(
@@ -287,3 +289,4 @@ def test_customer_cannot_access_admin_endpoints(client: TestClient, db_session: 
         },
     )
     assert response.status_code == 403
+    assert response.json()["detail"] == ADMIN_ACCESS_REQUIRED

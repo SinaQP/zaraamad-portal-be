@@ -20,6 +20,11 @@ globs: ["app/**/*.py"]
 - DTOs are API contracts; DO NOT auto-couple them to DB schemas.
 - Ensure alignment via explicit mappers and tests (not implicit mirroring).
 
+## Frontend message language
+- Every runtime message returned to frontend clients MUST be Persian.
+- This applies to success payload messages, `HTTPException.detail`, and validation error texts.
+- Do not introduce new English user-facing messages in API responses.
+
 ## Scope control (mandatory)
 - Do NOT create new endpoints, routes, modules, background jobs, or extra features unless explicitly requested by the user.
 - Implement only what is directly asked.

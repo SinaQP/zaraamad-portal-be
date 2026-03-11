@@ -5,6 +5,7 @@ from jose import JWTError, jwt
 
 from app.common.config import get_settings
 from app.common.enums import UserRole
+from app.common.messages import INVALID_AUTH_TOKEN, INVALID_TOKEN_TYPE
 
 
 class JWTService:
@@ -35,10 +36,10 @@ class JWTService:
         try:
             payload = jwt.decode(token, self._secret_key, algorithms=[self._algorithm])
         except JWTError as exc:
-            raise ValueError("Invalid authentication token.") from exc
+            raise ValueError(INVALID_AUTH_TOKEN) from exc
         token_type = payload.get("type")
         if token_type != "access":
-            raise ValueError("Invalid token type.")
+            raise ValueError(INVALID_TOKEN_TYPE)
         return payload
 
 

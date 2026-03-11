@@ -2,6 +2,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
+from app.common.messages import (
+    ADMIN_ACCESS_REQUIRED,
+    DUPLICATE_SERVICE_ID_IN_PAYLOAD,
+    MISSING_AUTH_TOKEN,
+)
 from app.modules.municipalities.schemas import Municipality
 from app.modules.users.schemas import User
 
@@ -914,6 +919,7 @@ def test_duplicate_municipality_service_pair_is_rejected(
         },
     )
     assert response.status_code == 422
+    assert response.json()["detail"] == DUPLICATE_SERVICE_ID_IN_PAYLOAD
 
 
 def test_sale_price_is_required(client: TestClient, db_session: Session) -> None:
@@ -948,6 +954,7 @@ def test_sale_price_is_required(client: TestClient, db_session: Session) -> None
         },
     )
     assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == "اين فيلد الزامي است."
 
 
 def test_negative_sale_price_is_rejected(client: TestClient, db_session: Session) -> None:
@@ -983,6 +990,7 @@ def test_negative_sale_price_is_rejected(client: TestClient, db_session: Session
         },
     )
     assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == "مقدار بايد بزرگ تر يا مساوي 0 باشد."
 
 
 def test_null_support_price_is_accepted(client: TestClient, db_session: Session) -> None:
@@ -1262,6 +1270,7 @@ def test_admin_only_access_enforced_and_customer_access_denied(
         },
     )
     assert unauthorized_response.status_code == 401
+    assert unauthorized_response.json()["detail"] == MISSING_AUTH_TOKEN
 
     customer_response = client.post(
         "/service-groups",
@@ -1275,3 +1284,4 @@ def test_admin_only_access_enforced_and_customer_access_denied(
         },
     )
     assert customer_response.status_code == 403
+    assert customer_response.json()["detail"] == ADMIN_ACCESS_REQUIRED

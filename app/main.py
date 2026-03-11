@@ -1,9 +1,12 @@
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.common import model_registry as _model_registry
 from app.common.config import get_settings
 from app.common.dtos import HomePageOut
+from app.common.exception_handlers import request_validation_exception_handler
+from app.common.messages import HOME_WELCOME_TEMPLATE
 from app.modules.auth.module import router as auth_router
 from app.modules.municipalities.module import router as municipality_router
 from app.modules.service_catalog.module import router as service_catalog_router
@@ -16,6 +19,10 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         description="Zaraamad Portal backend APIs.",
         version=settings.app_version,
+    )
+    app.add_exception_handler(
+        RequestValidationError,
+        request_validation_exception_handler,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -45,7 +52,7 @@ app = create_app()
 def get_home() -> HomePageOut:
     settings = get_settings()
     return HomePageOut(
-        message=f"Welcome to {settings.app_name}",
+        message=HOME_WELCOME_TEMPLATE.format(app_name=settings.app_name),
         app_name=settings.app_name,
         version=settings.app_version,
         docs_url="/docs",

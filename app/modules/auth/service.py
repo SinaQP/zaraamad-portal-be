@@ -8,6 +8,12 @@ from sqlalchemy.orm import Session
 from app.common.config import Settings, get_settings
 from app.common.database import Base, get_db_session
 from app.common.enums import OtpPurpose, UserRole
+from app.common.messages import (
+    OTP_EXPIRED,
+    OTP_INVALID,
+    TOO_MANY_OTP_REQUESTS,
+    USER_NOT_FOUND_OR_INACTIVE,
+)
 from app.common.security.jwt_service import JWTService, get_jwt_service
 from app.common.services.otp_provider import OTPProvider, get_otp_provider
 from app.modules.auth.dtos import AccessTokenOut, OtpRequestCreate, OtpRequestResult, OtpVerifyCreate
@@ -53,7 +59,7 @@ class AuthService:
         if user_row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found or inactive.",
+                detail=USER_NOT_FOUND_OR_INACTIVE,
             )
         self._enforce_rate_limit(mobile=dto.mobile)
         self._invalidate_previous_otps(mobile=dto.mobile, purpose=OtpPurpose.LOGIN)
@@ -82,17 +88,17 @@ class AuthService:
         if otp_record is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OTP is invalid.",
+                detail=OTP_INVALID,
             )
         if otp_record.code != dto.otp_code:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OTP is invalid.",
+                detail=OTP_INVALID,
             )
         if self._is_expired(otp_record.expires_at):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OTP is expired.",
+                detail=OTP_EXPIRED,
             )
         otp_record.is_used = True
         user_row = self._get_active_user_by_mobile(mobile=dto.mobile)
@@ -100,7 +106,7 @@ class AuthService:
             self._db_session.commit()
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found or inactive.",
+                detail=USER_NOT_FOUND_OR_INACTIVE,
             )
         access_token = self._jwt_service.create_access_token(
             user_id=user_row["id"],
@@ -142,7 +148,7 @@ class AuthService:
         if request_count >= self._otp_policy.request_limit_count:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many OTP requests. Try again later.",
+                detail=TOO_MANY_OTP_REQUESTS,
             )
 
     def _invalidate_previous_otps(self, mobile: str, purpose: OtpPurpose) -> None:
