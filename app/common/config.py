@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     otp_dev_mode: bool = True
     sms_api_url: str = "https://payamsms.com/services/rest/index.php"
     sms_request_timeout_seconds: int = 15
+    bridge_request_timeout_seconds: int = 10
     sms_panel_organization: str | None = None
     sms_panel_username: str | None = None
     sms_panel_password: str | None = None

@@ -1,17 +1,24 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Response, status
 
 from app.common.enums import SortOrder
 from app.common.pagination import PaginationParams, set_pagination_headers
 from app.common.security.dependencies import require_admin
 from app.modules.customers.dtos import (
+    CustomerBridgeCapabilitiesOut,
+    CustomerBridgeHealthOut,
     CustomerCreate,
     CustomerOut,
     CustomerUpdate,
 )
 from app.modules.customers.mappers import CustomerMapper, get_customer_mapper
-from app.modules.customers.service import CustomerService, get_customer_service
+from app.modules.customers.service import (
+    CustomerBridgeService,
+    CustomerService,
+    get_customer_bridge_service,
+    get_customer_service,
+)
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
@@ -137,3 +144,73 @@ def deactivate_customer(
 ) -> CustomerOut:
     customer = service.deactivate(customer_id=customer_id)
     return mapper.to_out(customer=customer)
+
+
+@router.get(
+    "/{customer_id}/bridge/health",
+    response_model=CustomerBridgeHealthOut,
+    summary="Get customer bridge health",
+    description="Call the configured municipality bridge health endpoint for a customer.",
+    responses={
+        200: {"description": "Customer bridge health returned."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer not found."},
+        409: {"description": "Customer bridge configuration is incomplete."},
+        502: {"description": "Customer bridge returned an invalid or unauthorized response."},
+        503: {"description": "Customer bridge is unreachable."},
+    },
+)
+def get_customer_bridge_health(
+    customer_id: int,
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to the customer bridge.",
+    ),
+    _: object = Depends(require_admin),
+    service: CustomerBridgeService = Depends(get_customer_bridge_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerBridgeHealthOut:
+    customer, bridge_health = service.get_health(
+        customer_id=customer_id,
+        correlation_id=x_correlation_id,
+    )
+    return mapper.to_bridge_health_out(
+        customer=customer,
+        bridge_health=bridge_health,
+    )
+
+
+@router.get(
+    "/{customer_id}/bridge/capabilities",
+    response_model=CustomerBridgeCapabilitiesOut,
+    summary="Get customer bridge capabilities",
+    description="Call the configured municipality bridge capabilities endpoint for a customer.",
+    responses={
+        200: {"description": "Customer bridge capabilities returned."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer not found."},
+        409: {"description": "Customer bridge configuration is incomplete."},
+        502: {"description": "Customer bridge returned an invalid or unauthorized response."},
+        503: {"description": "Customer bridge is unreachable."},
+    },
+)
+def get_customer_bridge_capabilities(
+    customer_id: int,
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to the customer bridge.",
+    ),
+    _: object = Depends(require_admin),
+    service: CustomerBridgeService = Depends(get_customer_bridge_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerBridgeCapabilitiesOut:
+    customer, bridge_capabilities = service.get_capabilities(
+        customer_id=customer_id,
+        correlation_id=x_correlation_id,
+    )
+    return mapper.to_bridge_capabilities_out(
+        customer=customer,
+        bridge_capabilities=bridge_capabilities,
+    )
