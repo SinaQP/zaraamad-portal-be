@@ -1,1 +1,1 @@
-VERSION = "dev"
+from app.version import VERSION
