@@ -7,6 +7,8 @@ from app.common.pagination import PaginationParams, get_pagination_params, set_p
 from app.common.security.dependencies import require_admin
 from app.modules.customers.dtos import (
     CustomerBridgeCapabilitiesOut,
+    CustomerBridgeConfigOut,
+    CustomerBridgeConfigUpdate,
     CustomerBridgeHealthOut,
     CustomerCreate,
     CustomerListOut,
@@ -16,8 +18,10 @@ from app.modules.customers.dtos import (
 from app.modules.customers.mappers import CustomerMapper, get_customer_mapper
 from app.modules.customers.service import (
     CustomerBridgeService,
+    CustomerBridgeConfigService,
     CustomerService,
     get_customer_bridge_service,
+    get_customer_bridge_config_service,
     get_customer_service,
 )
 
@@ -178,6 +182,95 @@ def deactivate_customer(
 
 
 @router.get(
+    "/{customer_id}/bridge",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=CustomerBridgeConfigOut,
+    summary="Get customer bridge config",
+    description="Return the current bridge configuration view for a customer.",
+    responses={
+        200: {"description": "Customer bridge configuration returned."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer not found."},
+    },
+)
+def get_customer_bridge_config(
+    customer_id: int,
+    _: object = Depends(require_admin),
+    service: CustomerBridgeConfigService = Depends(get_customer_bridge_config_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerBridgeConfigOut:
+    customer, bridge_config = service.get(customer_id=customer_id)
+    return mapper.to_bridge_config_out(
+        customer=customer,
+        bridge_config=bridge_config,
+    )
+
+
+@router.post(
+    "/{customer_id}/bridge/refresh-status",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=CustomerBridgeConfigOut,
+    summary="Refresh customer bridge status",
+    description="Run a live bridge health check, update cached bridge status fields, and return the latest cached status view.",
+    responses={
+        200: {"description": "Customer bridge status refreshed."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer not found."},
+        409: {"description": "Customer bridge configuration is incomplete."},
+    },
+)
+def refresh_customer_bridge_status(
+    customer_id: int,
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to the customer bridge.",
+    ),
+    _: object = Depends(require_admin),
+    service: CustomerBridgeService = Depends(get_customer_bridge_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerBridgeConfigOut:
+    customer, bridge_config = service.refresh_status(
+        customer_id=customer_id,
+        correlation_id=x_correlation_id,
+    )
+    return mapper.to_bridge_config_out(
+        customer=customer,
+        bridge_config=bridge_config,
+    )
+
+
+@router.patch(
+    "/{customer_id}/bridge",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=CustomerBridgeConfigOut,
+    summary="Update customer bridge config",
+    description="Create or partially update the stored bridge configuration for a customer.",
+    responses={
+        200: {"description": "Customer bridge configuration updated."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer not found."},
+        409: {"description": "Data integrity error."},
+    },
+)
+def update_customer_bridge_config(
+    customer_id: int,
+    payload: CustomerBridgeConfigUpdate,
+    _: object = Depends(require_admin),
+    service: CustomerBridgeConfigService = Depends(get_customer_bridge_config_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerBridgeConfigOut:
+    customer, bridge_config = service.upsert(
+        customer_id=customer_id,
+        dto=payload,
+    )
+    return mapper.to_bridge_config_out(
+        customer=customer,
+        bridge_config=bridge_config,
+    )
+
+
+@router.get(
     "/{customer_id}/bridge/health",
     tags=[CUSTOMER_BRIDGE_TAG],
     response_model=CustomerBridgeHealthOut,
@@ -203,12 +296,13 @@ def get_customer_bridge_health(
     service: CustomerBridgeService = Depends(get_customer_bridge_service),
     mapper: CustomerMapper = Depends(get_customer_mapper),
 ) -> CustomerBridgeHealthOut:
-    customer, bridge_health = service.get_health(
+    customer, bridge_config, bridge_health = service.get_health(
         customer_id=customer_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_bridge_health_out(
         customer=customer,
+        bridge_config=bridge_config,
         bridge_health=bridge_health,
     )
 
@@ -239,11 +333,12 @@ def get_customer_bridge_capabilities(
     service: CustomerBridgeService = Depends(get_customer_bridge_service),
     mapper: CustomerMapper = Depends(get_customer_mapper),
 ) -> CustomerBridgeCapabilitiesOut:
-    customer, bridge_capabilities = service.get_capabilities(
+    customer, bridge_config, bridge_capabilities = service.get_capabilities(
         customer_id=customer_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_bridge_capabilities_out(
         customer=customer,
+        bridge_config=bridge_config,
         bridge_capabilities=bridge_capabilities,
     )

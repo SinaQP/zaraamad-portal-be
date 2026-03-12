@@ -33,7 +33,7 @@ OPENAPI_TAGS = [
     },
     {
         "name": "customer-bridge",
-        "description": "Customer bridge health and capability endpoints.",
+        "description": "Customer bridge configuration, cached status, health, and capability endpoints.",
     },
     {
         "name": "service-projects",

@@ -112,16 +112,59 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
         json={
             "name": "Tehran Customer",
             "grade": 1,
+        },
+    )
+    assert customer_response.status_code == 201
+    customer_data = customer_response.json()
+    customer_id = customer_data["id"]
+
+    bridge_config_response = client.get(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+    )
+    assert bridge_config_response.status_code == 200
+    assert bridge_config_response.json() == {
+        "customer_id": customer_id,
+        "customer_name": "Tehran Customer",
+        "bridge_base_url": None,
+        "bridge_is_enabled": False,
+        "bridge_has_api_key": False,
+        "last_online_status": None,
+        "last_health_checked_at": None,
+        "last_health_error": None,
+    }
+
+    bridge_update_response = client.patch(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+        json={
             "bridge_base_url": "https://tehran.example.com/",
             "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
-    assert customer_response.status_code == 201
-    customer_data = customer_response.json()
-    assert customer_data["bridge_base_url"] == "https://tehran.example.com"
-    assert customer_data["bridge_has_api_key"] is True
-    customer_id = customer_data["id"]
+    assert bridge_update_response.status_code == 200
+    assert bridge_update_response.json() == {
+        "customer_id": customer_id,
+        "customer_name": "Tehran Customer",
+        "bridge_base_url": "https://tehran.example.com",
+        "bridge_is_enabled": True,
+        "bridge_has_api_key": True,
+        "last_online_status": None,
+        "last_health_checked_at": None,
+        "last_health_error": None,
+    }
+
+    refresh_response = client.post(
+        f"/customers/{customer_id}/bridge/refresh-status",
+        headers={**headers, "X-Correlation-ID": "corr-refresh"},
+    )
+    assert refresh_response.status_code == 200
+    refresh_data = refresh_response.json()
+    assert refresh_data["customer_id"] == customer_id
+    assert refresh_data["last_online_status"] is True
+    assert refresh_data["last_health_checked_at"] is not None
+    assert refresh_data["last_health_error"] is None
 
     health_response = client.get(
         f"/customers/{customer_id}/bridge/health",
@@ -151,6 +194,15 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
     ]
 
     assert bridge_client.requests == [
+        (
+            "health",
+            BridgeRequest(
+                base_url="https://tehran.example.com",
+                api_key="bridge-secret",
+                timeout_seconds=10,
+                correlation_id="corr-refresh",
+            ),
+        ),
         (
             "health",
             BridgeRequest(
@@ -197,6 +249,54 @@ def test_customer_bridge_health_rejects_incomplete_bridge_configuration(
     assert "bridge_is_enabled" in response.json()["developer_message"]
 
 
+def test_customer_bridge_refresh_status_caches_offline_result_without_failing(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    app.dependency_overrides[get_bridge_client] = lambda: UnavailableBridgeClient()
+    headers = _admin_headers(client=client, db_session=db_session)
+    customer_response = client.post(
+        "/customers",
+        headers=headers,
+        json={
+            "name": "Mashhad Customer",
+            "grade": 1,
+        },
+    )
+    assert customer_response.status_code == 201
+    customer_id = customer_response.json()["id"]
+
+    bridge_update_response = client.patch(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+        json={
+            "bridge_base_url": "https://mashhad.example.com",
+            "bridge_api_key": "bridge-secret",
+            "bridge_is_enabled": True,
+        },
+    )
+    assert bridge_update_response.status_code == 200
+
+    refresh_response = client.post(
+        f"/customers/{customer_id}/bridge/refresh-status",
+        headers=headers,
+    )
+    assert refresh_response.status_code == 200
+    refresh_data = refresh_response.json()
+    assert refresh_data["last_online_status"] is False
+    assert refresh_data["last_health_checked_at"] is not None
+    assert "timed out" in refresh_data["last_health_error"]
+
+    bridge_config_response = client.get(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+    )
+    assert bridge_config_response.status_code == 200
+    bridge_config_data = bridge_config_response.json()
+    assert bridge_config_data["last_online_status"] is False
+    assert "timed out" in bridge_config_data["last_health_error"]
+
+
 def test_customer_bridge_health_maps_unavailable_bridge_to_service_unavailable(
     client: TestClient,
     db_session: Session,
@@ -209,13 +309,21 @@ def test_customer_bridge_health_maps_unavailable_bridge_to_service_unavailable(
         json={
             "name": "Karaj Customer",
             "grade": 1,
+        },
+    )
+    assert customer_response.status_code == 201
+    customer_id = customer_response.json()["id"]
+
+    bridge_update_response = client.patch(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+        json={
             "bridge_base_url": "https://karaj.example.com",
             "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
-    assert customer_response.status_code == 201
-    customer_id = customer_response.json()["id"]
+    assert bridge_update_response.status_code == 200
 
     response = client.get(
         f"/customers/{customer_id}/bridge/health",
@@ -224,6 +332,15 @@ def test_customer_bridge_health_maps_unavailable_bridge_to_service_unavailable(
     assert response.status_code == 503
     assert response.json()["message"] == CUSTOMER_BRIDGE_UNAVAILABLE
     assert response.json()["detail"] == CUSTOMER_BRIDGE_UNAVAILABLE
+
+    bridge_config_response = client.get(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+    )
+    assert bridge_config_response.status_code == 200
+    bridge_config_data = bridge_config_response.json()
+    assert bridge_config_data["last_online_status"] is False
+    assert "timed out" in bridge_config_data["last_health_error"]
 
 
 def test_customer_bridge_capabilities_maps_unauthorized_bridge_to_bad_gateway(
@@ -238,13 +355,21 @@ def test_customer_bridge_capabilities_maps_unauthorized_bridge_to_bad_gateway(
         json={
             "name": "Shiraz Customer",
             "grade": 3,
+        },
+    )
+    assert customer_response.status_code == 201
+    customer_id = customer_response.json()["id"]
+
+    bridge_update_response = client.patch(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+        json={
             "bridge_base_url": "https://shiraz.example.com",
             "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
-    assert customer_response.status_code == 201
-    customer_id = customer_response.json()["id"]
+    assert bridge_update_response.status_code == 200
 
     response = client.get(
         f"/customers/{customer_id}/bridge/capabilities",
