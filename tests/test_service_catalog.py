@@ -99,18 +99,11 @@ def _create_service_group(
     project_id: int | None = None,
     sort_order: int = 10,
 ) -> int:
-    resolved_project_id = project_id or _create_service_project(
-        client=client,
-        headers=headers,
-        code=f"{code}-project",
-        name=f"{name} Project",
-        sort_order=sort_order,
-    )
+    del project_id
     response = client.post(
         "/service-groups",
         headers=headers,
         json={
-            "project_id": resolved_project_id,
             "code": code,
             "name": name,
             "description": f"{name} services",
@@ -125,15 +118,24 @@ def _create_service(
     client: TestClient,
     headers: dict[str, str],
     *,
+    project_id: int | None = None,
     group_id: int,
     code: str,
     name: str,
     sort_order: int = 10,
 ) -> int:
+    resolved_project_id = project_id or _create_service_project(
+        client=client,
+        headers=headers,
+        code=f"{code}-project",
+        name=f"{name} Project",
+        sort_order=sort_order,
+    )
     response = client.post(
         "/services",
         headers=headers,
         json={
+            "project_id": resolved_project_id,
             "group_id": group_id,
             "code": code,
             "name": name,
@@ -147,18 +149,11 @@ def _create_service(
 
 def test_create_service_group(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    project_id = _create_service_project(
-        client=client,
-        headers=headers,
-        code="security-project",
-        name="Security Project",
-    )
 
     response = client.post(
         "/service-groups",
         headers=headers,
         json={
-            "project_id": project_id,
             "code": "security",
             "name": "Security",
             "description": "Security services",
@@ -167,8 +162,6 @@ def test_create_service_group(client: TestClient, db_session: Session) -> None:
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["project_id"] == project_id
-    assert data["project"]["name"] == "Security Project"
     assert data["code"] == "security"
     assert data["name"] == "Security"
     assert data["is_active"] is True
@@ -249,6 +242,43 @@ def test_service_project_list_supports_search_sort_and_pagination(
     assert paged_response.headers["X-Total-Pages"] == "2"
 
 
+def test_get_all_service_projects_returns_all_items_without_pagination(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+
+    _create_service_project(
+        client=client,
+        headers=headers,
+        name="Core Project",
+        sort_order=1,
+    )
+    _create_service_project(
+        client=client,
+        headers=headers,
+        name="Support Project",
+        sort_order=2,
+    )
+    _create_service_project(
+        client=client,
+        headers=headers,
+        name="Billing Project",
+        sort_order=3,
+    )
+
+    response = client.get("/service-projects/all", headers=headers)
+    assert response.status_code == 200
+
+    items = response.json()
+    assert len(items) == 3
+    assert [item["name"] for item in items] == [
+        "Core Project",
+        "Support Project",
+        "Billing Project",
+    ]
+
+
 def test_update_and_deactivate_service_project(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
     project_id = _create_service_project(
@@ -296,18 +326,11 @@ def test_update_service_group(client: TestClient, db_session: Session) -> None:
 
 def test_duplicate_service_group_code_is_allowed(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
-    project_id = _create_service_project(
-        client=client,
-        headers=headers,
-        code="shared-group-project",
-        name="Shared Group Project",
-    )
 
     first_response = client.post(
         "/service-groups",
         headers=headers,
         json={
-            "project_id": project_id,
             "code": "shared-code",
             "name": "Group One",
             "description": None,
@@ -318,7 +341,6 @@ def test_duplicate_service_group_code_is_allowed(client: TestClient, db_session:
         "/service-groups",
         headers=headers,
         json={
-            "project_id": project_id,
             "code": "shared-code",
             "name": "Group Two",
             "description": None,
@@ -380,6 +402,7 @@ def test_create_service_under_group_and_filter_by_group(
     _create_service(
         client=client,
         headers=headers,
+        project_id=security_project_id,
         group_id=security_group_id,
         code="camera-monitoring",
         name="Camera Monitoring",
@@ -387,6 +410,7 @@ def test_create_service_under_group_and_filter_by_group(
     _create_service(
         client=client,
         headers=headers,
+        project_id=infra_project_id,
         group_id=infra_group_id,
         code="fiber-upgrade",
         name="Fiber Upgrade",
@@ -449,6 +473,7 @@ def test_update_service_group_assignment(client: TestClient, db_session: Session
     service_id = _create_service(
         client=client,
         headers=headers,
+        project_id=first_project_id,
         group_id=first_group_id,
         code="hotline",
         name="Hotline",
@@ -457,7 +482,7 @@ def test_update_service_group_assignment(client: TestClient, db_session: Session
     response = client.patch(
         f"/services/{service_id}",
         headers=headers,
-        json={"group_id": second_group_id},
+        json={"project_id": second_project_id, "group_id": second_group_id},
     )
     assert response.status_code == 200
     data = response.json()
@@ -469,6 +494,12 @@ def test_update_service_group_assignment(client: TestClient, db_session: Session
 
 def test_duplicate_service_code_is_allowed(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
+    project_id = _create_service_project(
+        client=client,
+        headers=headers,
+        code="duplicate-service-code-project",
+        name="Duplicate Service Code Project",
+    )
     group_id = _create_service_group(
         client=client,
         headers=headers,
@@ -480,6 +511,7 @@ def test_duplicate_service_code_is_allowed(client: TestClient, db_session: Sessi
         "/services",
         headers=headers,
         json={
+            "project_id": project_id,
             "group_id": group_id,
             "code": "shared-service-code",
             "name": "Service One",
@@ -491,6 +523,7 @@ def test_duplicate_service_code_is_allowed(client: TestClient, db_session: Sessi
         "/services",
         headers=headers,
         json={
+            "project_id": project_id,
             "group_id": group_id,
             "code": "shared-service-code",
             "name": "Service Two",
@@ -579,16 +612,6 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
     assert group_search_data["items"][0]["name"] == "Operations"
     assert group_search.headers["X-Total-Count"] == "1"
 
-    group_filtered = client.get(
-        "/service-groups",
-        headers=headers,
-        params={"project_id": core_project_id},
-    )
-    assert group_filtered.status_code == 200
-    group_filtered_data = group_filtered.json()
-    assert group_filtered_data["total_page"] == 1
-    assert len(group_filtered_data["items"]) == 2
-
     group_paged = client.get(
         "/service-groups",
         headers=headers,
@@ -609,6 +632,7 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
     _create_service(
         client=client,
         headers=headers,
+        project_id=core_project_id,
         group_id=security_group_id,
         code="alpha-service",
         name="Alpha Service",
@@ -617,6 +641,7 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
     _create_service(
         client=client,
         headers=headers,
+        project_id=core_project_id,
         group_id=ops_group_id,
         code="gamma-service",
         name="Gamma Service",
@@ -625,6 +650,7 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
     _create_service(
         client=client,
         headers=headers,
+        project_id=core_project_id,
         group_id=ops_group_id,
         code="beta-service",
         name="Beta Service",
@@ -673,6 +699,121 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
     assert service_paged.headers["X-Total-Pages"] == "2"
 
 
+def test_get_all_service_groups_returns_all_items_without_pagination(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+
+    _create_service_group(
+        client=client,
+        headers=headers,
+        code="security",
+        name="Security",
+        sort_order=1,
+    )
+    _create_service_group(
+        client=client,
+        headers=headers,
+        code="operations",
+        name="Operations",
+        sort_order=2,
+    )
+    _create_service_group(
+        client=client,
+        headers=headers,
+        code="support",
+        name="Support",
+        sort_order=3,
+    )
+
+    response = client.get("/service-groups/all", headers=headers)
+    assert response.status_code == 200
+
+    items = response.json()
+    assert len(items) == 3
+    assert [item["code"] for item in items] == [
+        "security",
+        "operations",
+        "support",
+    ]
+
+
+def test_service_project_hierarchy_lists_groups_and_services_by_project(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    first_project_id = _create_service_project(
+        client=client,
+        headers=headers,
+        code="first-hierarchy-project",
+        name="First Hierarchy Project",
+        sort_order=1,
+    )
+    second_project_id = _create_service_project(
+        client=client,
+        headers=headers,
+        code="second-hierarchy-project",
+        name="Second Hierarchy Project",
+        sort_order=2,
+    )
+    shared_group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="shared-hierarchy-group",
+        name="Shared Hierarchy Group",
+        sort_order=1,
+    )
+
+    _create_service(
+        client=client,
+        headers=headers,
+        project_id=first_project_id,
+        group_id=shared_group_id,
+        code="first-project-service",
+        name="First Project Service",
+        sort_order=1,
+    )
+    _create_service(
+        client=client,
+        headers=headers,
+        project_id=second_project_id,
+        group_id=shared_group_id,
+        code="second-project-service",
+        name="Second Project Service",
+        sort_order=1,
+    )
+
+    response = client.get("/service-projects/hierarchy", headers=headers)
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) == 2
+
+    item_map = {item["id"]: item for item in items}
+    first_project = item_map[first_project_id]
+    second_project = item_map[second_project_id]
+
+    assert len(first_project["groups"]) == 1
+    assert first_project["groups"][0]["code"] == "shared-hierarchy-group"
+    assert first_project["groups"][0]["services"][0]["code"] == "first-project-service"
+
+    assert len(second_project["groups"]) == 1
+    assert second_project["groups"][0]["code"] == "shared-hierarchy-group"
+    assert second_project["groups"][0]["services"][0]["code"] == "second-project-service"
+
+    filtered_response = client.get(
+        "/service-projects/hierarchy",
+        headers=headers,
+        params={"project_id": second_project_id},
+    )
+    assert filtered_response.status_code == 200
+    filtered_items = filtered_response.json()
+    assert len(filtered_items) == 1
+    assert filtered_items[0]["id"] == second_project_id
+    assert filtered_items[0]["groups"][0]["services"][0]["code"] == "second-project-service"
+
+
 def test_create_customer_service_config_and_list(
     client: TestClient,
     db_session: Session,
@@ -695,6 +836,7 @@ def test_create_customer_service_config_and_list(
     service_id = _create_service(
         client=client,
         headers=headers,
+        project_id=project_id,
         group_id=group_id,
         code="guarding",
         name="Guarding",
@@ -758,6 +900,7 @@ def test_customer_service_list_supports_filter_search_sort_and_pagination(
     service_a = _create_service(
         client=client,
         headers=headers,
+        project_id=project_id,
         group_id=group_id,
         code="guard",
         name="Guard",
@@ -766,6 +909,7 @@ def test_customer_service_list_supports_filter_search_sort_and_pagination(
     service_b = _create_service(
         client=client,
         headers=headers,
+        project_id=project_id,
         group_id=group_id,
         code="camera",
         name="Camera",
@@ -774,6 +918,7 @@ def test_customer_service_list_supports_filter_search_sort_and_pagination(
     service_c = _create_service(
         client=client,
         headers=headers,
+        project_id=project_id,
         group_id=group_id,
         code="fiber",
         name="Fiber",
@@ -1238,6 +1383,7 @@ def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
     service_guard = _create_service(
         client=client,
         headers=headers,
+        project_id=security_project_id,
         group_id=security_group_id,
         code="guard",
         name="Guard",
@@ -1245,6 +1391,7 @@ def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
     service_camera = _create_service(
         client=client,
         headers=headers,
+        project_id=security_project_id,
         group_id=security_group_id,
         code="camera",
         name="Camera",
@@ -1252,6 +1399,7 @@ def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
     service_fiber = _create_service(
         client=client,
         headers=headers,
+        project_id=infra_project_id,
         group_id=infra_group_id,
         code="fiber",
         name="Fiber",
@@ -1332,17 +1480,10 @@ def test_admin_only_access_enforced_and_customer_access_denied(
     customer_user = _create_customer_user(db_session=db_session, customer_id=customer_entity.id)
     customer_token = _login(client=client, mobile=customer_user.mobile)
     headers = _admin_headers(client=client, db_session=db_session)
-    project_id = _create_service_project(
-        client=client,
-        headers=headers,
-        code="authz-project",
-        name="AuthZ Project",
-    )
 
     unauthorized_response = client.post(
         "/service-groups",
         json={
-            "project_id": project_id,
             "code": "unauthorized",
             "name": "Unauthorized",
             "description": None,
@@ -1358,7 +1499,6 @@ def test_admin_only_access_enforced_and_customer_access_denied(
         "/service-groups",
         headers={"Authorization": f"Bearer {customer_token}"},
         json={
-            "project_id": project_id,
             "code": "denied",
             "name": "Denied",
             "description": None,

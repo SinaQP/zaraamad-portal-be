@@ -3,6 +3,9 @@ from app.modules.service_catalog.dtos import (
     ServiceGroupInfo,
     ServiceGroupOut,
     ServiceOut,
+    ServiceProjectHierarchyGroupOut,
+    ServiceProjectHierarchyProjectOut,
+    ServiceProjectHierarchyServiceOut,
     ServiceProjectInfo,
     ServiceProjectOut,
 )
@@ -21,15 +24,21 @@ class ServiceCatalogMapper:
             updated_at=project.updated_at,
         )
 
-    def to_service_group_out(self, group: ServiceGroup, project: ServiceProject) -> ServiceGroupOut:
+    def to_service_group_info(self, group: ServiceGroup) -> ServiceGroupInfo:
+        return ServiceGroupInfo(
+            id=group.id,
+            code=group.code,
+            name=group.name,
+            is_active=group.is_active,
+        )
+
+    def to_service_group_out(self, group: ServiceGroup) -> ServiceGroupOut:
         return ServiceGroupOut(
             id=group.id,
-            project_id=group.project_id,
             code=group.code,
             name=group.name,
             description=group.description,
             sort_order=group.sort_order,
-            project=self.to_service_project_info(project=project),
             is_active=group.is_active,
             created_at=group.created_at,
             updated_at=group.updated_at,
@@ -45,23 +54,57 @@ class ServiceCatalogMapper:
     def to_service_out(self, service: Service, group: ServiceGroup, project: ServiceProject) -> ServiceOut:
         return ServiceOut(
             id=service.id,
+            project_id=service.project_id,
             group_id=service.group_id,
-            project_id=project.id,
             code=service.code,
             name=service.name,
             description=service.description,
             sort_order=service.sort_order,
             is_active=service.is_active,
             project=self.to_service_project_info(project=project),
-            group=ServiceGroupInfo(
-                id=group.id,
-                project_id=group.project_id,
-                code=group.code,
-                name=group.name,
-                is_active=group.is_active,
-            ),
+            group=self.to_service_group_info(group=group),
             created_at=service.created_at,
             updated_at=service.updated_at,
+        )
+
+    def to_service_project_hierarchy_service_out(self, service: Service) -> ServiceProjectHierarchyServiceOut:
+        return ServiceProjectHierarchyServiceOut(
+            id=service.id,
+            code=service.code,
+            name=service.name,
+            description=service.description,
+            sort_order=service.sort_order,
+            is_active=service.is_active,
+            created_at=service.created_at,
+            updated_at=service.updated_at,
+        )
+
+    def to_service_project_hierarchy_group_out(
+        self,
+        group: ServiceGroup,
+        services: list[Service],
+    ) -> ServiceProjectHierarchyGroupOut:
+        group_out = self.to_service_group_out(group=group)
+        return ServiceProjectHierarchyGroupOut(
+            **group_out.model_dump(),
+            services=[
+                self.to_service_project_hierarchy_service_out(service=item)
+                for item in services
+            ],
+        )
+
+    def to_service_project_hierarchy_project_out(
+        self,
+        project: ServiceProject,
+        groups: list[tuple[ServiceGroup, list[Service]]],
+    ) -> ServiceProjectHierarchyProjectOut:
+        project_out = self.to_service_project_out(project=project)
+        return ServiceProjectHierarchyProjectOut(
+            **project_out.model_dump(),
+            groups=[
+                self.to_service_project_hierarchy_group_out(group=group, services=services)
+                for group, services in groups
+            ],
         )
 
     def to_customer_config_out(

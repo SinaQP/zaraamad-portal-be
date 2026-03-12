@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -6,14 +10,14 @@ from sqlalchemy.orm import Session
 from app.common.database import Base, get_db_session
 from app.common.enums import SortOrder
 from app.common.messages import (
+    CUSTOMER_NOT_FOUND,
+    CUSTOMER_SERVICE_CONFIG_NOT_FOUND,
     DATA_INTEGRITY_ERROR,
     DUPLICATE_CUSTOMER_SERVICE_CONFIGURATION,
     DUPLICATE_SERVICE_ID_IN_PAYLOAD,
     GROUP_ID_CANNOT_BE_NULL,
     GROUP_ID_INVALID,
     INACTIVE_SERVICE_CANNOT_BE_ASSIGNED,
-    CUSTOMER_NOT_FOUND,
-    CUSTOMER_SERVICE_CONFIG_NOT_FOUND,
     PROJECT_ID_CANNOT_BE_NULL,
     PROJECT_ID_INVALID,
     SALE_PRICE_CANNOT_BE_NULL,
@@ -24,10 +28,10 @@ from app.common.messages import (
 )
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.modules.service_catalog.dtos import (
+    CustomerPricingSummaryCustomer,
     CustomerPricingSummaryGroup,
     CustomerPricingSummaryGroupTotals,
     CustomerPricingSummaryItem,
-    CustomerPricingSummaryCustomer,
     CustomerPricingSummaryResult,
     CustomerPricingSummaryTotals,
     CustomerServiceConfigBulkUpsertCreate,
@@ -41,6 +45,18 @@ from app.modules.service_catalog.dtos import (
     ServiceUpdate,
 )
 from app.modules.service_catalog.schemas import CustomerServiceConfig, Service, ServiceGroup, ServiceProject
+
+
+@dataclass
+class ProjectHierarchyGroup:
+    group: ServiceGroup
+    services: list[Service]
+
+
+@dataclass
+class ProjectHierarchy:
+    project: ServiceProject
+    groups: list[ProjectHierarchyGroup]
 
 
 class CustomerLookupService:
@@ -107,8 +123,6 @@ class ServiceProjectQueryBuilder:
 class ServiceGroupQueryBuilder:
     SORT_COLUMNS = {
         "id": ServiceGroup.id,
-        "project_id": ServiceGroup.project_id,
-        "project_sort_order": ServiceProject.sort_order,
         "code": ServiceGroup.code,
         "name": ServiceGroup.name,
         "sort_order": ServiceGroup.sort_order,
@@ -119,15 +133,12 @@ class ServiceGroupQueryBuilder:
 
     def build_list_query(
         self,
-        project_id: int | None,
         is_active: bool | None,
         search: str | None,
         sort_by: str,
         sort_order: SortOrder,
-    ) -> Select[tuple[ServiceGroup, ServiceProject]]:
-        query = select(ServiceGroup, ServiceProject).join(ServiceProject, ServiceProject.id == ServiceGroup.project_id)
-        if project_id is not None:
-            query = query.where(ServiceGroup.project_id == project_id)
+    ) -> Select[tuple[ServiceGroup]]:
+        query = select(ServiceGroup)
         if is_active is not None:
             query = query.where(ServiceGroup.is_active.is_(is_active))
         if search:
@@ -137,21 +148,18 @@ class ServiceGroupQueryBuilder:
                     ServiceGroup.code.ilike(search_pattern),
                     ServiceGroup.name.ilike(search_pattern),
                     ServiceGroup.description.ilike(search_pattern),
-                    ServiceProject.name.ilike(search_pattern),
                 )
             )
         sort_column = self.SORT_COLUMNS[sort_by]
         if sort_order == SortOrder.DESC:
             query = query.order_by(
                 sort_column.desc(),
-                ServiceProject.sort_order.desc(),
                 ServiceGroup.sort_order.desc(),
                 ServiceGroup.id.desc(),
             )
         else:
             query = query.order_by(
                 sort_column.asc(),
-                ServiceProject.sort_order.asc(),
                 ServiceGroup.sort_order.asc(),
                 ServiceGroup.id.asc(),
             )
@@ -161,7 +169,7 @@ class ServiceGroupQueryBuilder:
 class ServiceQueryBuilder:
     SORT_COLUMNS = {
         "id": Service.id,
-        "project_id": ServiceProject.id,
+        "project_id": Service.project_id,
         "group_id": Service.group_id,
         "project_sort_order": ServiceProject.sort_order,
         "group_sort_order": ServiceGroup.sort_order,
@@ -185,10 +193,10 @@ class ServiceQueryBuilder:
         query = (
             select(Service, ServiceGroup, ServiceProject)
             .join(ServiceGroup, ServiceGroup.id == Service.group_id)
-            .join(ServiceProject, ServiceProject.id == ServiceGroup.project_id)
+            .join(ServiceProject, ServiceProject.id == Service.project_id)
         )
         if project_id is not None:
-            query = query.where(ServiceGroup.project_id == project_id)
+            query = query.where(Service.project_id == project_id)
         if group_id is not None:
             query = query.where(Service.group_id == group_id)
         if is_active is not None:
@@ -270,6 +278,15 @@ class ServiceProjectService:
         )
         return items, meta
 
+    def list_all(self) -> list[ServiceProject]:
+        query = self._query_builder.build_list_query(
+            is_active=None,
+            search=None,
+            sort_by="sort_order",
+            sort_order=SortOrder.ASC,
+        )
+        return list(self._db_session.scalars(query).all())
+
     def get_or_404(self, project_id: int) -> ServiceProject:
         project = self._db_session.get(ServiceProject, project_id)
         if project is None:
@@ -306,233 +323,10 @@ class ServiceProjectService:
             ) from exc
 
 
-class ServiceGroupService:
-    def __init__(self, db_session: Session) -> None:
-        self._db_session = db_session
-        self._query_builder = ServiceGroupQueryBuilder()
-
-    def create(self, dto: ServiceGroupCreate) -> tuple[ServiceGroup, ServiceProject]:
-        project = self._get_project_or_422(project_id=dto.project_id)
-        group = ServiceGroup(
-            project_id=project.id,
-            code=dto.code,
-            name=dto.name,
-            description=dto.description,
-            sort_order=dto.sort_order,
-            is_active=True,
-        )
-        self._db_session.add(group)
-        self._commit_with_integrity_guard()
-        self._db_session.refresh(group)
-        return group, project
-
-    def list(
-        self,
-        project_id: int | None,
-        is_active: bool | None,
-        search: str | None,
-        sort_by: str,
-        sort_order: SortOrder,
-        pagination: PaginationParams,
-    ) -> tuple[list[tuple[ServiceGroup, ServiceProject]], PaginationMeta]:
-        query = self._query_builder.build_list_query(
-            project_id=project_id,
-            is_active=is_active,
-            search=search,
-            sort_by=sort_by,
-            sort_order=sort_order,
-        )
-        total_count = int(
-            self._db_session.scalar(
-                select(func.count()).select_from(query.order_by(None).subquery())
-            ) or 0
-        )
-        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
-        rows = self._db_session.execute(paginated_query).all()
-        items = [(row[0], row[1]) for row in rows]
-        meta = PaginationMeta(
-            total_count=total_count,
-            page=pagination.page,
-            page_size=pagination.page_size,
-        )
-        return items, meta
-
-    def get_or_404(self, group_id: int) -> tuple[ServiceGroup, ServiceProject]:
-        row = self._db_session.execute(
-            select(ServiceGroup, ServiceProject)
-            .join(ServiceProject, ServiceProject.id == ServiceGroup.project_id)
-            .where(ServiceGroup.id == group_id)
-        ).first()
-        if row is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=SERVICE_GROUP_NOT_FOUND,
-            )
-        return row[0], row[1]
-
-    def update(self, group_id: int, dto: ServiceGroupUpdate) -> tuple[ServiceGroup, ServiceProject]:
-        group, _ = self.get_or_404(group_id=group_id)
-        update_data = dto.model_dump(exclude_unset=True, exclude_none=False)
-        if "project_id" in update_data:
-            project_id = update_data["project_id"]
-            if project_id is None:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=PROJECT_ID_CANNOT_BE_NULL,
-                )
-            self._get_project_or_422(project_id=project_id)
-        for field_name, field_value in update_data.items():
-            setattr(group, field_name, field_value)
-        self._commit_with_integrity_guard()
-        self._db_session.refresh(group)
-        return self.get_or_404(group_id=group_id)
-
-    def deactivate(self, group_id: int) -> tuple[ServiceGroup, ServiceProject]:
-        group, _ = self.get_or_404(group_id=group_id)
-        group.is_active = False
-        self._db_session.commit()
-        self._db_session.refresh(group)
-        return self.get_or_404(group_id=group_id)
-
-    def _get_project_or_422(self, project_id: int) -> ServiceProject:
-        project = self._db_session.get(ServiceProject, project_id)
-        if project is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=PROJECT_ID_INVALID,
-            )
-        return project
-
-    def _commit_with_integrity_guard(self) -> None:
-        try:
-            self._db_session.commit()
-        except IntegrityError as exc:
-            self._db_session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=DATA_INTEGRITY_ERROR,
-            ) from exc
-
-
-class ServiceCatalogService:
-    def __init__(self, db_session: Session) -> None:
-        self._db_session = db_session
-        self._query_builder = ServiceQueryBuilder()
-
-    def create(self, dto: ServiceCreate) -> tuple[Service, ServiceGroup, ServiceProject]:
-        group, project = self._get_group_with_project_or_422(group_id=dto.group_id)
-        service = Service(
-            group_id=group.id,
-            code=dto.code,
-            name=dto.name,
-            description=dto.description,
-            is_active=True,
-            sort_order=dto.sort_order,
-        )
-        self._db_session.add(service)
-        self._commit_with_integrity_guard()
-        self._db_session.refresh(service)
-        return service, group, project
-
-    def list(
-        self,
-        project_id: int | None,
-        group_id: int | None,
-        is_active: bool | None,
-        search: str | None,
-        sort_by: str,
-        sort_order: SortOrder,
-        pagination: PaginationParams,
-    ) -> tuple[list[tuple[Service, ServiceGroup, ServiceProject]], PaginationMeta]:
-        query = self._query_builder.build_list_query(
-            project_id=project_id,
-            group_id=group_id,
-            is_active=is_active,
-            search=search,
-            sort_by=sort_by,
-            sort_order=sort_order,
-        )
-        total_count = int(
-            self._db_session.scalar(
-                select(func.count()).select_from(query.order_by(None).subquery())
-            ) or 0
-        )
-        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
-        rows = self._db_session.execute(paginated_query).all()
-        items = [(row[0], row[1], row[2]) for row in rows]
-        meta = PaginationMeta(
-            total_count=total_count,
-            page=pagination.page,
-            page_size=pagination.page_size,
-        )
-        return items, meta
-
-    def get_or_404(self, service_id: int) -> tuple[Service, ServiceGroup, ServiceProject]:
-        row = self._db_session.execute(
-            select(Service, ServiceGroup, ServiceProject)
-            .join(ServiceGroup, ServiceGroup.id == Service.group_id)
-            .join(ServiceProject, ServiceProject.id == ServiceGroup.project_id)
-            .where(Service.id == service_id)
-        ).first()
-        if row is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=SERVICE_NOT_FOUND,
-            )
-        return row[0], row[1], row[2]
-
-    def update(self, service_id: int, dto: ServiceUpdate) -> tuple[Service, ServiceGroup, ServiceProject]:
-        service, _, _ = self.get_or_404(service_id=service_id)
-        update_data = dto.model_dump(exclude_unset=True, exclude_none=False)
-        if "group_id" in update_data:
-            group_id = update_data["group_id"]
-            if group_id is None:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=GROUP_ID_CANNOT_BE_NULL,
-                )
-            self._get_group_with_project_or_422(group_id=group_id)
-        for field_name, field_value in update_data.items():
-            setattr(service, field_name, field_value)
-        self._commit_with_integrity_guard()
-        self._db_session.refresh(service)
-        return self.get_or_404(service_id=service_id)
-
-    def deactivate(self, service_id: int) -> tuple[Service, ServiceGroup, ServiceProject]:
-        service, _, _ = self.get_or_404(service_id=service_id)
-        service.is_active = False
-        self._db_session.commit()
-        self._db_session.refresh(service)
-        return self.get_or_404(service_id=service_id)
-
-    def _get_group_with_project_or_422(self, group_id: int) -> tuple[ServiceGroup, ServiceProject]:
-        row = self._db_session.execute(
-            select(ServiceGroup, ServiceProject)
-            .join(ServiceProject, ServiceProject.id == ServiceGroup.project_id)
-            .where(ServiceGroup.id == group_id)
-        ).first()
-        if row is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=GROUP_ID_INVALID,
-            )
-        return row[0], row[1]
-
-    def _commit_with_integrity_guard(self) -> None:
-        try:
-            self._db_session.commit()
-        except IntegrityError as exc:
-            self._db_session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=DATA_INTEGRITY_ERROR,
-            ) from exc
-
-
 class CustomerServiceConfigQueryBuilder:
     SORT_COLUMNS = {
         "id": CustomerServiceConfig.id,
-        "project_id": ServiceProject.id,
+        "project_id": Service.project_id,
         "project_name": ServiceProject.name,
         "project_sort_order": ServiceProject.sort_order,
         "service_id": Service.id,
@@ -562,11 +356,11 @@ class CustomerServiceConfigQueryBuilder:
             select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
             .join(Service, Service.id == CustomerServiceConfig.service_id)
             .join(ServiceGroup, ServiceGroup.id == Service.group_id)
-            .join(ServiceProject, ServiceProject.id == ServiceGroup.project_id)
+            .join(ServiceProject, ServiceProject.id == Service.project_id)
             .where(CustomerServiceConfig.customer_id == customer_id)
         )
         if project_id is not None:
-            query = query.where(ServiceGroup.project_id == project_id)
+            query = query.where(Service.project_id == project_id)
         if is_enabled is not None:
             query = query.where(CustomerServiceConfig.is_enabled.is_(is_enabled))
         if search:
@@ -753,7 +547,7 @@ class CustomerServiceConfigService:
             select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
             .join(Service, Service.id == CustomerServiceConfig.service_id)
             .join(ServiceGroup, ServiceGroup.id == Service.group_id)
-            .join(ServiceProject, ServiceProject.id == ServiceGroup.project_id)
+            .join(ServiceProject, ServiceProject.id == Service.project_id)
             .where(CustomerServiceConfig.id == config_id)
         ).first()
         if row is None:
@@ -807,7 +601,7 @@ class CustomerPricingSummaryService:
             select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
             .join(Service, Service.id == CustomerServiceConfig.service_id)
             .join(ServiceGroup, ServiceGroup.id == Service.group_id)
-            .join(ServiceProject, ServiceProject.id == ServiceGroup.project_id)
+            .join(ServiceProject, ServiceProject.id == Service.project_id)
             .where(CustomerServiceConfig.customer_id == customer_id)
             .order_by(
                 ServiceProject.sort_order.asc(),
@@ -817,7 +611,7 @@ class CustomerPricingSummaryService:
             )
         ).all()
 
-        group_bucket: dict[int, CustomerPricingSummaryGroup] = {}
+        group_bucket: dict[tuple[int, int], CustomerPricingSummaryGroup] = {}
         total_sale = 0
         total_support = 0
 
@@ -832,7 +626,8 @@ class CustomerPricingSummaryService:
             line_support_total = support_price_value if config.is_enabled else 0
             line_grand_total = line_sale_total + line_support_total
 
-            group_entry = group_bucket.get(group.id)
+            bucket_key = (project.id, group.id)
+            group_entry = group_bucket.get(bucket_key)
             if group_entry is None:
                 group_entry = CustomerPricingSummaryGroup(
                     project_id=project.id,
@@ -847,7 +642,7 @@ class CustomerPricingSummaryService:
                         grand_total=0,
                     ),
                 )
-                group_bucket[group.id] = group_entry
+                group_bucket[bucket_key] = group_entry
 
             group_entry.items.append(
                 CustomerPricingSummaryItem(
@@ -915,3 +710,284 @@ def get_customer_pricing_summary_service(
 ) -> CustomerPricingSummaryService:
     return CustomerPricingSummaryService(db_session=db_session)
 
+
+class ServiceGroupService:
+    def __init__(self, db_session: Session) -> None:
+        self._db_session = db_session
+        self._query_builder = ServiceGroupQueryBuilder()
+
+    def create(self, dto: ServiceGroupCreate) -> ServiceGroup:
+        group = ServiceGroup(
+            code=dto.code,
+            name=dto.name,
+            description=dto.description,
+            sort_order=dto.sort_order,
+            is_active=True,
+        )
+        self._db_session.add(group)
+        self._commit_with_integrity_guard()
+        self._db_session.refresh(group)
+        return group
+
+    def list(
+        self,
+        is_active: bool | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+        pagination: PaginationParams,
+    ) -> tuple[list[ServiceGroup], PaginationMeta]:
+        query = self._query_builder.build_list_query(
+            is_active=is_active,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total_count = int(
+            self._db_session.scalar(
+                select(func.count()).select_from(query.order_by(None).subquery())
+            ) or 0
+        )
+        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
+        items = list(self._db_session.scalars(paginated_query).all())
+        meta = PaginationMeta(
+            total_count=total_count,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
+        return items, meta
+
+    def list_all(self) -> list[ServiceGroup]:
+        query = self._query_builder.build_list_query(
+            is_active=None,
+            search=None,
+            sort_by="sort_order",
+            sort_order=SortOrder.ASC,
+        )
+        return list(self._db_session.scalars(query).all())
+
+    def get_or_404(self, group_id: int) -> ServiceGroup:
+        group = self._db_session.get(ServiceGroup, group_id)
+        if group is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=SERVICE_GROUP_NOT_FOUND,
+            )
+        return group
+
+    def update(self, group_id: int, dto: ServiceGroupUpdate) -> ServiceGroup:
+        group = self.get_or_404(group_id=group_id)
+        update_data = dto.model_dump(exclude_unset=True, exclude_none=False)
+        for field_name, field_value in update_data.items():
+            setattr(group, field_name, field_value)
+        self._commit_with_integrity_guard()
+        self._db_session.refresh(group)
+        return group
+
+    def deactivate(self, group_id: int) -> ServiceGroup:
+        group = self.get_or_404(group_id=group_id)
+        group.is_active = False
+        self._db_session.commit()
+        self._db_session.refresh(group)
+        return group
+
+    def _commit_with_integrity_guard(self) -> None:
+        try:
+            self._db_session.commit()
+        except IntegrityError as exc:
+            self._db_session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=DATA_INTEGRITY_ERROR,
+            ) from exc
+
+
+class ServiceCatalogService:
+    def __init__(self, db_session: Session) -> None:
+        self._db_session = db_session
+        self._query_builder = ServiceQueryBuilder()
+
+    def create(self, dto: ServiceCreate) -> tuple[Service, ServiceGroup, ServiceProject]:
+        project = self._get_project_or_422(project_id=dto.project_id)
+        group = self._get_group_or_422(group_id=dto.group_id)
+        service = Service(
+            project_id=project.id,
+            group_id=group.id,
+            code=dto.code,
+            name=dto.name,
+            description=dto.description,
+            is_active=True,
+            sort_order=dto.sort_order,
+        )
+        self._db_session.add(service)
+        self._commit_with_integrity_guard()
+        self._db_session.refresh(service)
+        return service, group, project
+
+    def list(
+        self,
+        project_id: int | None,
+        group_id: int | None,
+        is_active: bool | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+        pagination: PaginationParams,
+    ) -> tuple[list[tuple[Service, ServiceGroup, ServiceProject]], PaginationMeta]:
+        query = self._query_builder.build_list_query(
+            project_id=project_id,
+            group_id=group_id,
+            is_active=is_active,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total_count = int(
+            self._db_session.scalar(
+                select(func.count()).select_from(query.order_by(None).subquery())
+            ) or 0
+        )
+        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
+        rows = self._db_session.execute(paginated_query).all()
+        items = [(row[0], row[1], row[2]) for row in rows]
+        meta = PaginationMeta(
+            total_count=total_count,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
+        return items, meta
+
+    def list_grouped_by_project(self, project_id: int | None) -> list[ProjectHierarchy]:
+        if project_id is None:
+            projects = list(
+                self._db_session.scalars(
+                    select(ServiceProject).order_by(ServiceProject.sort_order.asc(), ServiceProject.id.asc())
+                ).all()
+            )
+        else:
+            projects = [self._get_project_or_404(project_id=project_id)]
+
+        if not projects:
+            return []
+
+        project_ids = [project.id for project in projects]
+        project_bucket = {
+            project.id: ProjectHierarchy(project=project, groups=[])
+            for project in projects
+        }
+
+        rows = self._db_session.execute(
+            select(Service, ServiceGroup, ServiceProject)
+            .join(ServiceGroup, ServiceGroup.id == Service.group_id)
+            .join(ServiceProject, ServiceProject.id == Service.project_id)
+            .where(Service.project_id.in_(project_ids))
+            .order_by(
+                ServiceProject.sort_order.asc(),
+                ServiceProject.id.asc(),
+                ServiceGroup.sort_order.asc(),
+                ServiceGroup.id.asc(),
+                Service.sort_order.asc(),
+                Service.id.asc(),
+            )
+        ).all()
+
+        group_bucket: dict[tuple[int, int], ProjectHierarchyGroup] = {}
+        for row in rows:
+            service: Service = row[0]
+            group: ServiceGroup = row[1]
+            project: ServiceProject = row[2]
+            bucket_key = (project.id, group.id)
+            group_entry = group_bucket.get(bucket_key)
+            if group_entry is None:
+                group_entry = ProjectHierarchyGroup(group=group, services=[])
+                group_bucket[bucket_key] = group_entry
+                project_bucket[project.id].groups.append(group_entry)
+            group_entry.services.append(service)
+
+        return list(project_bucket.values())
+
+    def get_or_404(self, service_id: int) -> tuple[Service, ServiceGroup, ServiceProject]:
+        row = self._db_session.execute(
+            select(Service, ServiceGroup, ServiceProject)
+            .join(ServiceGroup, ServiceGroup.id == Service.group_id)
+            .join(ServiceProject, ServiceProject.id == Service.project_id)
+            .where(Service.id == service_id)
+        ).first()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=SERVICE_NOT_FOUND,
+            )
+        return row[0], row[1], row[2]
+
+    def update(self, service_id: int, dto: ServiceUpdate) -> tuple[Service, ServiceGroup, ServiceProject]:
+        service, _, _ = self.get_or_404(service_id=service_id)
+        update_data = dto.model_dump(exclude_unset=True, exclude_none=False)
+
+        if "project_id" in update_data:
+            project_id = update_data["project_id"]
+            if project_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=PROJECT_ID_CANNOT_BE_NULL,
+                )
+            self._get_project_or_422(project_id=project_id)
+
+        if "group_id" in update_data:
+            group_id = update_data["group_id"]
+            if group_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=GROUP_ID_CANNOT_BE_NULL,
+                )
+            self._get_group_or_422(group_id=group_id)
+
+        for field_name, field_value in update_data.items():
+            setattr(service, field_name, field_value)
+        self._commit_with_integrity_guard()
+        self._db_session.refresh(service)
+        return self.get_or_404(service_id=service_id)
+
+    def deactivate(self, service_id: int) -> tuple[Service, ServiceGroup, ServiceProject]:
+        service, _, _ = self.get_or_404(service_id=service_id)
+        service.is_active = False
+        self._db_session.commit()
+        self._db_session.refresh(service)
+        return self.get_or_404(service_id=service_id)
+
+    def _get_group_or_422(self, group_id: int) -> ServiceGroup:
+        group = self._db_session.get(ServiceGroup, group_id)
+        if group is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=GROUP_ID_INVALID,
+            )
+        return group
+
+    def _get_project_or_404(self, project_id: int) -> ServiceProject:
+        project = self._db_session.get(ServiceProject, project_id)
+        if project is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=SERVICE_PROJECT_NOT_FOUND,
+            )
+        return project
+
+    def _get_project_or_422(self, project_id: int) -> ServiceProject:
+        project = self._db_session.get(ServiceProject, project_id)
+        if project is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=PROJECT_ID_INVALID,
+            )
+        return project
+
+    def _commit_with_integrity_guard(self) -> None:
+        try:
+            self._db_session.commit()
+        except IntegrityError as exc:
+            self._db_session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=DATA_INTEGRITY_ERROR,
+            ) from exc

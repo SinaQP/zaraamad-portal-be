@@ -2,7 +2,7 @@
 
 Backend API for Zaraamad Portal Phase 1.
 
-Current release: `0.6.1`
+Current release: `0.6.2`
 
 ## Overview
 

@@ -45,7 +45,6 @@ class ServiceProjectInfo(MongoDTO):
 
 
 class ServiceGroupBase(MongoDTO):
-    project_id: int = Field(..., description="Service project id.", examples=[1])
     code: str = Field(..., description="Service group code.", examples=["security"])
     name: str = Field(..., description="Service group display name.", examples=["Security"])
     description: str | None = Field(
@@ -61,7 +60,6 @@ class ServiceGroupCreate(ServiceGroupBase):
 
 
 class ServiceGroupOut(WithId, ServiceGroupBase):
-    project: ServiceProjectInfo = Field(..., description="Service project information.")
     is_active: bool = Field(..., description="Service group active status.", examples=[True])
     created_at: datetime = Field(..., description="Creation timestamp.")
     updated_at: datetime = Field(..., description="Last update timestamp.")
@@ -72,7 +70,6 @@ class ServiceGroupListOut(PaginatedResponse[ServiceGroupOut]):
 
 
 class ServiceGroupUpdate(MongoDTO):
-    project_id: int | None = Field(default=None, description="Service project id.", examples=[1])
     code: str | None = Field(default=None, description="Service group code.", examples=["taxes"])
     name: str | None = Field(default=None, description="Service group display name.", examples=["Taxes"])
     description: str | None = Field(default=None, description="Service group description.", examples=["Tax services"])
@@ -82,13 +79,13 @@ class ServiceGroupUpdate(MongoDTO):
 
 class ServiceGroupInfo(MongoDTO):
     id: int = Field(..., description="Service group id.", examples=[1])
-    project_id: int = Field(..., description="Service project id.", examples=[1])
     code: str = Field(..., description="Service group code.", examples=["security"])
     name: str = Field(..., description="Service group name.", examples=["Security"])
     is_active: bool = Field(..., description="Service group active status.", examples=[True])
 
 
 class ServiceBase(MongoDTO):
+    project_id: int = Field(..., description="Service project id.", examples=[1])
     group_id: int = Field(..., description="Service group id.", examples=[1])
     code: str = Field(..., description="Service code.", examples=["camera-monitoring"])
     name: str = Field(..., description="Service display name.", examples=["Camera Monitoring"])
@@ -105,7 +102,6 @@ class ServiceCreate(ServiceBase):
 
 
 class ServiceOut(WithId, ServiceBase):
-    project_id: int = Field(..., description="Service project id.", examples=[1])
     is_active: bool = Field(..., description="Service active status.", examples=[True])
     project: ServiceProjectInfo = Field(..., description="Service project information.")
     group: ServiceGroupInfo = Field(..., description="Service group information.")
@@ -118,12 +114,31 @@ class ServiceListOut(PaginatedResponse[ServiceOut]):
 
 
 class ServiceUpdate(MongoDTO):
+    project_id: int | None = Field(default=None, description="Service project id.", examples=[1])
     group_id: int | None = Field(default=None, description="Service group id.", examples=[1])
     code: str | None = Field(default=None, description="Service code.", examples=["it-support"])
     name: str | None = Field(default=None, description="Service display name.", examples=["IT Support"])
     description: str | None = Field(default=None, description="Service description.", examples=["Support service"])
     sort_order: int | None = Field(default=None, description="Sort order for listing.", examples=[30])
     is_active: bool | None = Field(default=None, description="Service active status.", examples=[True])
+
+
+class ServiceProjectHierarchyServiceOut(WithId, MongoDTO):
+    code: str = Field(..., description="Service code.", examples=["camera-monitoring"])
+    name: str = Field(..., description="Service display name.", examples=["Camera Monitoring"])
+    description: str | None = Field(default=None, description="Service description.")
+    sort_order: int | None = Field(default=None, description="Sort order for listing.", examples=[10])
+    is_active: bool = Field(..., description="Service active status.", examples=[True])
+    created_at: datetime = Field(..., description="Creation timestamp.")
+    updated_at: datetime = Field(..., description="Last update timestamp.")
+
+
+class ServiceProjectHierarchyGroupOut(ServiceGroupOut):
+    services: list[ServiceProjectHierarchyServiceOut] = Field(..., description="Services inside this group.")
+
+
+class ServiceProjectHierarchyProjectOut(ServiceProjectOut):
+    groups: list[ServiceProjectHierarchyGroupOut] = Field(..., description="Groups and services for this project.")
 
 
 class CustomerServiceConfigBase(MongoDTO):

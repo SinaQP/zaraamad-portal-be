@@ -18,6 +18,7 @@ from app.modules.service_catalog.dtos import (
     ServiceGroupUpdate,
     ServiceListOut,
     ServiceOut,
+    ServiceProjectHierarchyProjectOut,
     ServiceProjectCreate,
     ServiceProjectListOut,
     ServiceProjectOut,
@@ -102,6 +103,52 @@ def list_service_projects(
 
 
 @router.get(
+    "/service-projects/all",
+    response_model=list[ServiceProjectOut],
+    summary="Get all service projects",
+    description="Return all service projects without pagination for select inputs.",
+    responses={
+        200: {"description": "All service projects returned."},
+        403: {"description": "Admin access required."},
+    },
+)
+def get_all_service_projects(
+    _: object = Depends(require_admin),
+    service: ServiceProjectService = Depends(get_service_project_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> list[ServiceProjectOut]:
+    projects = service.list_all()
+    return [mapper.to_service_project_out(project=item) for item in projects]
+
+
+@router.get(
+    "/service-projects/hierarchy",
+    response_model=list[ServiceProjectHierarchyProjectOut],
+    summary="List service hierarchy by project",
+    description="Return projects and nest their groups and services under each project.",
+    responses={
+        200: {"description": "Service hierarchy returned."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Service project not found."},
+    },
+)
+def list_service_project_hierarchy(
+    project_id: int | None = Query(default=None, description="Filter to a single service project id."),
+    _: object = Depends(require_admin),
+    service: ServiceCatalogService = Depends(get_service_catalog_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> list[ServiceProjectHierarchyProjectOut]:
+    items = service.list_grouped_by_project(project_id=project_id)
+    return [
+        mapper.to_service_project_hierarchy_project_out(
+            project=item.project,
+            groups=[(group_item.group, group_item.services) for group_item in item.groups],
+        )
+        for item in items
+    ]
+
+
+@router.get(
     "/service-projects/{project_id}",
     response_model=ServiceProjectOut,
     summary="Get service project",
@@ -171,7 +218,7 @@ def deactivate_service_project(
     response_model=ServiceGroupOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create service group",
-    description="Create a new service group under a service project. Only admin users can access this endpoint.",
+    description="Create a new reusable service group. Only admin users can access this endpoint.",
     responses={
         201: {"description": "Service group created."},
         403: {"description": "Admin access required."},
@@ -184,15 +231,15 @@ def create_service_group(
     service: ServiceGroupService = Depends(get_service_group_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> ServiceGroupOut:
-    group, project = service.create(dto=payload)
-    return mapper.to_service_group_out(group=group, project=project)
+    group = service.create(dto=payload)
+    return mapper.to_service_group_out(group=group)
 
 
 @router.get(
     "/service-groups",
     response_model=ServiceGroupListOut,
     summary="List service groups",
-    description="Return service groups with optional project and active-state filtering.",
+    description="Return service groups with optional active-state filtering.",
     responses={
         200: {"description": "Service group list returned."},
         403: {"description": "Admin access required."},
@@ -200,13 +247,10 @@ def create_service_group(
 )
 def list_service_groups(
     response: Response,
-    project_id: int | None = Query(default=None, description="Filter by service project id."),
     is_active: bool | None = Query(default=None, description="Filter by active flag."),
-    search: str | None = Query(default=None, description="Search by project name or group code, name, or description."),
+    search: str | None = Query(default=None, description="Search by group code, name, or description."),
     sort_by: Literal[
         "id",
-        "project_id",
-        "project_sort_order",
         "code",
         "name",
         "sort_order",
@@ -214,7 +258,7 @@ def list_service_groups(
         "created_at",
         "updated_at",
     ] = Query(
-        default="project_sort_order",
+        default="sort_order",
         description="Sort field.",
     ),
     sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
@@ -224,7 +268,6 @@ def list_service_groups(
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> ServiceGroupListOut:
     groups, meta = service.list(
-        project_id=project_id,
         is_active=is_active,
         search=search,
         sort_by=sort_by,
@@ -233,9 +276,28 @@ def list_service_groups(
     )
     set_pagination_headers(response=response, meta=meta)
     return ServiceGroupListOut(
-        items=[mapper.to_service_group_out(group=item, project=project) for item, project in groups],
+        items=[mapper.to_service_group_out(group=item) for item in groups],
         total_page=meta.total_pages,
     )
+
+
+@router.get(
+    "/service-groups/all",
+    response_model=list[ServiceGroupOut],
+    summary="Get all service groups",
+    description="Return all service groups without pagination for select inputs.",
+    responses={
+        200: {"description": "All service groups returned."},
+        403: {"description": "Admin access required."},
+    },
+)
+def get_all_service_groups(
+    _: object = Depends(require_admin),
+    service: ServiceGroupService = Depends(get_service_group_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> list[ServiceGroupOut]:
+    groups = service.list_all()
+    return [mapper.to_service_group_out(group=item) for item in groups]
 
 
 @router.get(
@@ -255,8 +317,8 @@ def get_service_group(
     service: ServiceGroupService = Depends(get_service_group_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> ServiceGroupOut:
-    group, project = service.get_or_404(group_id=group_id)
-    return mapper.to_service_group_out(group=group, project=project)
+    group = service.get_or_404(group_id=group_id)
+    return mapper.to_service_group_out(group=group)
 
 
 @router.patch(
@@ -278,8 +340,8 @@ def update_service_group(
     service: ServiceGroupService = Depends(get_service_group_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> ServiceGroupOut:
-    group, project = service.update(group_id=group_id, dto=payload)
-    return mapper.to_service_group_out(group=group, project=project)
+    group = service.update(group_id=group_id, dto=payload)
+    return mapper.to_service_group_out(group=group)
 
 
 @router.delete(
@@ -299,8 +361,8 @@ def deactivate_service_group(
     service: ServiceGroupService = Depends(get_service_group_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> ServiceGroupOut:
-    group, project = service.deactivate(group_id=group_id)
-    return mapper.to_service_group_out(group=group, project=project)
+    group = service.deactivate(group_id=group_id)
+    return mapper.to_service_group_out(group=group)
 
 
 @router.post(
@@ -308,7 +370,7 @@ def deactivate_service_group(
     response_model=ServiceOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create service catalog item",
-    description="Create a new global service catalog item. Only admin users can access this endpoint.",
+    description="Create a new service catalog item with both project and group references. Only admin users can access this endpoint.",
     responses={
         201: {"description": "Service created."},
         403: {"description": "Admin access required."},
