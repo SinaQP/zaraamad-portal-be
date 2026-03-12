@@ -3,19 +3,23 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.common.enums import SortOrder
-from app.common.pagination import PaginationParams, set_pagination_headers
+from app.common.pagination import PaginationParams, get_pagination_params, set_pagination_headers
 from app.common.security.dependencies import require_admin
 from app.modules.service_catalog.dtos import (
+    CustomerServiceConfigListOut,
     CustomerPricingSummaryResult,
     CustomerServiceConfigBulkUpsertCreate,
     CustomerServiceConfigOut,
     CustomerServiceConfigUpdate,
     ServiceCreate,
+    ServiceGroupListOut,
     ServiceGroupCreate,
     ServiceGroupOut,
     ServiceGroupUpdate,
+    ServiceListOut,
     ServiceOut,
     ServiceProjectCreate,
+    ServiceProjectListOut,
     ServiceProjectOut,
     ServiceProjectUpdate,
     ServiceUpdate,
@@ -61,7 +65,7 @@ def create_service_project(
 
 @router.get(
     "/service-projects",
-    response_model=list[ServiceProjectOut],
+    response_model=ServiceProjectListOut,
     summary="List service projects",
     description="Return service projects with optional active-state filtering.",
     responses={
@@ -78,21 +82,23 @@ def list_service_projects(
         description="Sort field.",
     ),
     sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
-    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
-    page_size: int = Query(default=20, ge=1, le=100, description="Page size."),
+    pagination: PaginationParams = Depends(get_pagination_params),
     _: object = Depends(require_admin),
     service: ServiceProjectService = Depends(get_service_project_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
-) -> list[ServiceProjectOut]:
+) -> ServiceProjectListOut:
     projects, meta = service.list(
         is_active=is_active,
         search=search,
         sort_by=sort_by,
         sort_order=sort_order,
-        pagination=PaginationParams(page=page, page_size=page_size),
+        pagination=pagination,
     )
     set_pagination_headers(response=response, meta=meta)
-    return [mapper.to_service_project_out(project=item) for item in projects]
+    return ServiceProjectListOut(
+        items=[mapper.to_service_project_out(project=item) for item in projects],
+        total_page=meta.total_pages,
+    )
 
 
 @router.get(
@@ -184,7 +190,7 @@ def create_service_group(
 
 @router.get(
     "/service-groups",
-    response_model=list[ServiceGroupOut],
+    response_model=ServiceGroupListOut,
     summary="List service groups",
     description="Return service groups with optional project and active-state filtering.",
     responses={
@@ -212,22 +218,24 @@ def list_service_groups(
         description="Sort field.",
     ),
     sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
-    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
-    page_size: int = Query(default=20, ge=1, le=100, description="Page size."),
+    pagination: PaginationParams = Depends(get_pagination_params),
     _: object = Depends(require_admin),
     service: ServiceGroupService = Depends(get_service_group_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
-) -> list[ServiceGroupOut]:
+) -> ServiceGroupListOut:
     groups, meta = service.list(
         project_id=project_id,
         is_active=is_active,
         search=search,
         sort_by=sort_by,
         sort_order=sort_order,
-        pagination=PaginationParams(page=page, page_size=page_size),
+        pagination=pagination,
     )
     set_pagination_headers(response=response, meta=meta)
-    return [mapper.to_service_group_out(group=item, project=project) for item, project in groups]
+    return ServiceGroupListOut(
+        items=[mapper.to_service_group_out(group=item, project=project) for item, project in groups],
+        total_page=meta.total_pages,
+    )
 
 
 @router.get(
@@ -319,7 +327,7 @@ def create_service(
 
 @router.get(
     "/services",
-    response_model=list[ServiceOut],
+    response_model=ServiceListOut,
     summary="List service catalog items",
     description="Return global services with optional project, group, and active-state filtering.",
     responses={
@@ -347,12 +355,11 @@ def list_services(
         "updated_at",
     ] = Query(default="project_sort_order", description="Sort field."),
     sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
-    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
-    page_size: int = Query(default=20, ge=1, le=100, description="Page size."),
+    pagination: PaginationParams = Depends(get_pagination_params),
     _: object = Depends(require_admin),
     service: ServiceCatalogService = Depends(get_service_catalog_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
-) -> list[ServiceOut]:
+) -> ServiceListOut:
     services, meta = service.list(
         project_id=project_id,
         group_id=group_id,
@@ -360,10 +367,13 @@ def list_services(
         search=search,
         sort_by=sort_by,
         sort_order=sort_order,
-        pagination=PaginationParams(page=page, page_size=page_size),
+        pagination=pagination,
     )
     set_pagination_headers(response=response, meta=meta)
-    return [mapper.to_service_out(service=item, group=group, project=project) for item, group, project in services]
+    return ServiceListOut(
+        items=[mapper.to_service_out(service=item, group=group, project=project) for item, group, project in services],
+        total_page=meta.total_pages,
+    )
 
 
 @router.get(
@@ -433,7 +443,7 @@ def deactivate_service(
 
 @router.get(
     "/customers/{customer_id}/services",
-    response_model=list[CustomerServiceConfigOut],
+    response_model=CustomerServiceConfigListOut,
     summary="List customer service configs",
     description="Return all configured services for a customer with project, group, price, and enabled status.",
     responses={
@@ -467,12 +477,11 @@ def list_customer_services(
         "updated_at",
     ] = Query(default="project_sort_order", description="Sort field."),
     sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
-    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
-    page_size: int = Query(default=20, ge=1, le=100, description="Page size."),
+    pagination: PaginationParams = Depends(get_pagination_params),
     _: object = Depends(require_admin),
     service: CustomerServiceConfigService = Depends(get_customer_service_config_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
-) -> list[CustomerServiceConfigOut]:
+) -> CustomerServiceConfigListOut:
     rows, meta = service.list_by_customer(
         customer_id=customer_id,
         project_id=project_id,
@@ -480,13 +489,16 @@ def list_customer_services(
         search=search,
         sort_by=sort_by,
         sort_order=sort_order,
-        pagination=PaginationParams(page=page, page_size=page_size),
+        pagination=pagination,
     )
     set_pagination_headers(response=response, meta=meta)
-    return [
-        mapper.to_customer_config_out(config=config, service=service_item, group=group, project=project)
-        for config, service_item, group, project in rows
-    ]
+    return CustomerServiceConfigListOut(
+        items=[
+            mapper.to_customer_config_out(config=config, service=service_item, group=group, project=project)
+            for config, service_item, group, project in rows
+        ],
+        total_page=meta.total_pages,
+    )
 
 
 @router.put(

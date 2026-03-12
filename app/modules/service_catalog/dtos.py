@@ -4,6 +4,7 @@ from pydantic import Field, model_validator
 
 from app.common.dtos import MongoDTO, WithId
 from app.common.messages import ITEMS_MUST_NOT_BE_EMPTY
+from app.common.pagination import PaginatedResponse
 
 
 class ServiceProjectBase(MongoDTO):
@@ -24,6 +25,10 @@ class ServiceProjectOut(WithId, ServiceProjectBase):
     is_active: bool = Field(..., description="Service project active status.", examples=[True])
     created_at: datetime = Field(..., description="Creation timestamp.")
     updated_at: datetime = Field(..., description="Last update timestamp.")
+
+
+class ServiceProjectListOut(PaginatedResponse[ServiceProjectOut]):
+    pass
 
 
 class ServiceProjectUpdate(MongoDTO):
@@ -60,6 +65,10 @@ class ServiceGroupOut(WithId, ServiceGroupBase):
     is_active: bool = Field(..., description="Service group active status.", examples=[True])
     created_at: datetime = Field(..., description="Creation timestamp.")
     updated_at: datetime = Field(..., description="Last update timestamp.")
+
+
+class ServiceGroupListOut(PaginatedResponse[ServiceGroupOut]):
+    pass
 
 
 class ServiceGroupUpdate(MongoDTO):
@@ -104,6 +113,10 @@ class ServiceOut(WithId, ServiceBase):
     updated_at: datetime = Field(..., description="Last update timestamp.")
 
 
+class ServiceListOut(PaginatedResponse[ServiceOut]):
+    pass
+
+
 class ServiceUpdate(MongoDTO):
     group_id: int | None = Field(default=None, description="Service group id.", examples=[1])
     code: str | None = Field(default=None, description="Service code.", examples=["it-support"])
@@ -142,6 +155,10 @@ class CustomerServiceConfigOut(WithId, CustomerServiceConfigBase):
     service_is_active: bool = Field(..., description="Service active status.", examples=[True])
     created_at: datetime = Field(..., description="Creation timestamp.")
     updated_at: datetime = Field(..., description="Last update timestamp.")
+
+
+class CustomerServiceConfigListOut(PaginatedResponse[CustomerServiceConfigOut]):
+    pass
 
 
 class CustomerServiceConfigUpdate(MongoDTO):

@@ -5,6 +5,7 @@ from pydantic import Field, field_validator, model_validator
 from app.common.dtos import MongoDTO, WithId
 from app.common.enums import UserRole
 from app.common.messages import CUSTOMER_ID_REQUIRED
+from app.common.pagination import PaginatedResponse
 from app.common.validators.mobile_validator import get_mobile_validator
 
 
@@ -42,9 +43,8 @@ class UserOut(WithId, UserBase):
     updated_at: datetime = Field(..., description="Last update timestamp.")
 
 
-class UserListOut(MongoDTO):
-    items: list[UserOut] = Field(..., description="List of users for the current page.")
-    total_page: int = Field(..., description="Total number of pages.", examples=[3])
+class UserListOut(PaginatedResponse[UserOut]):
+    pass
 
 
 class UserUpdate(MongoDTO):

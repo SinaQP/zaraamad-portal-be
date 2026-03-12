@@ -2,7 +2,7 @@
 
 Backend API for Zaraamad Portal Phase 1.
 
-Current release: `0.5.1`
+Current release: `0.6.1`
 
 ## Overview
 
@@ -145,6 +145,16 @@ CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
 ## Versioning
 
 Version is driven from `.env.example` and generated into `app/version.py`.
+
+Versioning rule for this project:
+
+- Patch bump: small bug fix, small refactor, cleanup, docs/tests/config update, or small adjustment to existing endpoints without a new business capability.
+- Minor bump: new feature, new endpoint, new module, new integration, or a clearly user-visible capability added to the system.
+- Major bump: large breaking change, removed or renamed APIs, major response/request contract rewrite, or a release that requires significant client migration.
+
+Default:
+
+- If the change is small and you are unsure, use a patch bump.
 
 After changing `APP_VERSION`, regenerate the build version:
 

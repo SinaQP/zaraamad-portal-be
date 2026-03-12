@@ -192,6 +192,63 @@ def test_create_service_project(client: TestClient, db_session: Session) -> None
     assert data["is_active"] is True
 
 
+def test_service_project_list_supports_search_sort_and_pagination(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+
+    _create_service_project(
+        client=client,
+        headers=headers,
+        name="Core Project",
+        sort_order=1,
+    )
+    _create_service_project(
+        client=client,
+        headers=headers,
+        name="Support Project",
+        sort_order=2,
+    )
+    _create_service_project(
+        client=client,
+        headers=headers,
+        name="Billing Project",
+        sort_order=3,
+    )
+
+    search_response = client.get(
+        "/service-projects",
+        headers=headers,
+        params={"search": "support"},
+    )
+    assert search_response.status_code == 200
+    search_data = search_response.json()
+    assert search_data["total_page"] == 1
+    assert len(search_data["items"]) == 1
+    assert search_data["items"][0]["name"] == "Support Project"
+    assert search_response.headers["X-Total-Count"] == "1"
+
+    paged_response = client.get(
+        "/service-projects",
+        headers=headers,
+        params={
+            "sort_by": "name",
+            "sort_order": "asc",
+            "page": 1,
+            "page_size": 2,
+        },
+    )
+    assert paged_response.status_code == 200
+    paged_data = paged_response.json()
+    assert paged_data["total_page"] == 2
+    assert len(paged_data["items"]) == 2
+    assert paged_data["items"][0]["name"] == "Billing Project"
+    assert paged_data["items"][1]["name"] == "Core Project"
+    assert paged_response.headers["X-Total-Count"] == "3"
+    assert paged_response.headers["X-Total-Pages"] == "2"
+
+
 def test_update_and_deactivate_service_project(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
     project_id = _create_service_project(
@@ -342,11 +399,12 @@ def test_create_service_under_group_and_filter_by_group(
     )
     assert response.status_code == 200
     services = response.json()
-    assert len(services) == 1
-    assert services[0]["group_id"] == security_group_id
-    assert services[0]["project_id"] == security_project_id
-    assert services[0]["group"]["code"] == "security"
-    assert services[0]["project"]["name"] == "Security Project"
+    assert services["total_page"] == 1
+    assert len(services["items"]) == 1
+    assert services["items"][0]["group_id"] == security_group_id
+    assert services["items"][0]["project_id"] == security_project_id
+    assert services["items"][0]["group"]["code"] == "security"
+    assert services["items"][0]["project"]["name"] == "Security Project"
 
     project_filtered_response = client.get(
         "/services",
@@ -355,8 +413,9 @@ def test_create_service_under_group_and_filter_by_group(
     )
     assert project_filtered_response.status_code == 200
     project_filtered_services = project_filtered_response.json()
-    assert len(project_filtered_services) == 1
-    assert project_filtered_services[0]["project_id"] == infra_project_id
+    assert project_filtered_services["total_page"] == 1
+    assert len(project_filtered_services["items"]) == 1
+    assert project_filtered_services["items"][0]["project_id"] == infra_project_id
 
 
 def test_update_service_group_assignment(client: TestClient, db_session: Session) -> None:
@@ -514,8 +573,10 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
         params={"search": "oper"},
     )
     assert group_search.status_code == 200
-    assert len(group_search.json()) == 1
-    assert group_search.json()[0]["name"] == "Operations"
+    group_search_data = group_search.json()
+    assert group_search_data["total_page"] == 1
+    assert len(group_search_data["items"]) == 1
+    assert group_search_data["items"][0]["name"] == "Operations"
     assert group_search.headers["X-Total-Count"] == "1"
 
     group_filtered = client.get(
@@ -524,7 +585,9 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
         params={"project_id": core_project_id},
     )
     assert group_filtered.status_code == 200
-    assert len(group_filtered.json()) == 2
+    group_filtered_data = group_filtered.json()
+    assert group_filtered_data["total_page"] == 1
+    assert len(group_filtered_data["items"]) == 2
 
     group_paged = client.get(
         "/service-groups",
@@ -537,7 +600,9 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
         },
     )
     assert group_paged.status_code == 200
-    assert len(group_paged.json()) == 2
+    group_paged_data = group_paged.json()
+    assert group_paged_data["total_page"] == 2
+    assert len(group_paged_data["items"]) == 2
     assert group_paged.headers["X-Total-Count"] == "3"
     assert group_paged.headers["X-Total-Pages"] == "2"
 
@@ -572,8 +637,10 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
         params={"search": "beta"},
     )
     assert service_search.status_code == 200
-    assert len(service_search.json()) == 1
-    assert service_search.json()[0]["code"] == "beta-service"
+    service_search_data = service_search.json()
+    assert service_search_data["total_page"] == 1
+    assert len(service_search_data["items"]) == 1
+    assert service_search_data["items"][0]["code"] == "beta-service"
     assert service_search.headers["X-Total-Count"] == "1"
 
     project_service_search = client.get(
@@ -582,7 +649,9 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
         params={"project_id": core_project_id},
     )
     assert project_service_search.status_code == 200
-    assert len(project_service_search.json()) == 3
+    project_service_search_data = project_service_search.json()
+    assert project_service_search_data["total_page"] == 1
+    assert len(project_service_search_data["items"]) == 3
 
     service_paged = client.get(
         "/services",
@@ -596,9 +665,10 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
     )
     assert service_paged.status_code == 200
     service_items = service_paged.json()
-    assert len(service_items) == 2
-    assert service_items[0]["code"] == "gamma-service"
-    assert service_items[1]["code"] == "beta-service"
+    assert service_items["total_page"] == 2
+    assert len(service_items["items"]) == 2
+    assert service_items["items"][0]["code"] == "gamma-service"
+    assert service_items["items"][1]["code"] == "beta-service"
     assert service_paged.headers["X-Total-Count"] == "3"
     assert service_paged.headers["X-Total-Pages"] == "2"
 
@@ -658,9 +728,10 @@ def test_create_customer_service_config_and_list(
     list_response = client.get(f"/customers/{customer.id}/services", headers=headers)
     assert list_response.status_code == 200
     list_data = list_response.json()
-    assert len(list_data) == 1
-    assert list_data[0]["project_name"] == "Security Project"
-    assert list_data[0]["group_code"] == "security"
+    assert list_data["total_page"] == 1
+    assert len(list_data["items"]) == 1
+    assert list_data["items"][0]["project_name"] == "Security Project"
+    assert list_data["items"][0]["group_code"] == "security"
 
 
 def test_customer_service_list_supports_filter_search_sort_and_pagination(
@@ -750,9 +821,10 @@ def test_customer_service_list_supports_filter_search_sort_and_pagination(
     )
     assert filtered_response.status_code == 200
     filtered_items = filtered_response.json()
-    assert len(filtered_items) == 1
-    assert filtered_items[0]["project_id"] == project_id
-    assert filtered_items[0]["service_code"] == "fiber"
+    assert filtered_items["total_page"] == 1
+    assert len(filtered_items["items"]) == 1
+    assert filtered_items["items"][0]["project_id"] == project_id
+    assert filtered_items["items"][0]["service_code"] == "fiber"
     assert filtered_response.headers["X-Total-Count"] == "1"
 
     project_filtered_response = client.get(
@@ -761,7 +833,9 @@ def test_customer_service_list_supports_filter_search_sort_and_pagination(
         params={"project_id": project_id},
     )
     assert project_filtered_response.status_code == 200
-    assert len(project_filtered_response.json()) == 3
+    project_filtered_data = project_filtered_response.json()
+    assert project_filtered_data["total_page"] == 1
+    assert len(project_filtered_data["items"]) == 3
 
     paged_response = client.get(
         f"/customers/{customer.id}/services",
@@ -775,9 +849,10 @@ def test_customer_service_list_supports_filter_search_sort_and_pagination(
     )
     assert paged_response.status_code == 200
     paged_items = paged_response.json()
-    assert len(paged_items) == 2
-    assert paged_items[0]["sale_price"] == 3000
-    assert paged_items[1]["sale_price"] == 2000
+    assert paged_items["total_page"] == 2
+    assert len(paged_items["items"]) == 2
+    assert paged_items["items"][0]["sale_price"] == 3000
+    assert paged_items["items"][1]["sale_price"] == 2000
     assert paged_response.headers["X-Total-Count"] == "3"
     assert paged_response.headers["X-Total-Pages"] == "2"
 
@@ -867,7 +942,7 @@ def test_bulk_upsert_customer_service_configs_omitted_items_remain_unchanged(
 
     list_response = client.get(f"/customers/{customer.id}/services", headers=headers)
     assert list_response.status_code == 200
-    items = list_response.json()
+    items = list_response.json()["items"]
     assert len(items) == 3
 
     item_map = {item["service_id"]: item for item in items}

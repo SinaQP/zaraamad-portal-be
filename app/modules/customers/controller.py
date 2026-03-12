@@ -3,7 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Header, Query, Response, status
 
 from app.common.enums import SortOrder
-from app.common.pagination import PaginationParams, set_pagination_headers
+from app.common.pagination import PaginationParams, get_pagination_params, set_pagination_headers
 from app.common.security.dependencies import require_admin
 from app.modules.customers.dtos import (
     CustomerBridgeCapabilitiesOut,
@@ -65,8 +65,7 @@ def list_customers(
         description="Sort field.",
     ),
     sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
-    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
-    page_size: int = Query(default=20, ge=1, le=100, description="Page size."),
+    pagination: PaginationParams = Depends(get_pagination_params),
     _: object = Depends(require_admin),
     service: CustomerService = Depends(get_customer_service),
     mapper: CustomerMapper = Depends(get_customer_mapper),
@@ -76,7 +75,7 @@ def list_customers(
         search=search,
         sort_by=sort_by,
         sort_order=sort_order,
-        pagination=PaginationParams(page=page, page_size=page_size),
+        pagination=pagination,
     )
     set_pagination_headers(response=response, meta=meta)
     return CustomerListOut(
