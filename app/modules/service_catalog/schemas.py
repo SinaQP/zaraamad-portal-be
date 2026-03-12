@@ -18,7 +18,6 @@ class ServiceGroup(Base, TimestampMixin):
     __tablename__ = "service_groups"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     sort_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -39,7 +38,6 @@ class Service(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    code: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")

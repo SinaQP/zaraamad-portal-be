@@ -45,7 +45,6 @@ class ServiceProjectInfo(MongoDTO):
 
 
 class ServiceGroupBase(MongoDTO):
-    code: str = Field(..., description="Service group code.", examples=["security"])
     name: str = Field(..., description="Service group display name.", examples=["Security"])
     description: str | None = Field(
         default=None,
@@ -70,7 +69,6 @@ class ServiceGroupListOut(PaginatedResponse[ServiceGroupOut]):
 
 
 class ServiceGroupUpdate(MongoDTO):
-    code: str | None = Field(default=None, description="Service group code.", examples=["taxes"])
     name: str | None = Field(default=None, description="Service group display name.", examples=["Taxes"])
     description: str | None = Field(default=None, description="Service group description.", examples=["Tax services"])
     sort_order: int | None = Field(default=None, description="Sort order for listing.", examples=[20])
@@ -79,7 +77,6 @@ class ServiceGroupUpdate(MongoDTO):
 
 class ServiceGroupInfo(MongoDTO):
     id: int = Field(..., description="Service group id.", examples=[1])
-    code: str = Field(..., description="Service group code.", examples=["security"])
     name: str = Field(..., description="Service group name.", examples=["Security"])
     is_active: bool = Field(..., description="Service group active status.", examples=[True])
 
@@ -87,7 +84,6 @@ class ServiceGroupInfo(MongoDTO):
 class ServiceBase(MongoDTO):
     project_id: int = Field(..., description="Service project id.", examples=[1])
     group_id: int = Field(..., description="Service group id.", examples=[1])
-    code: str = Field(..., description="Service code.", examples=["camera-monitoring"])
     name: str = Field(..., description="Service display name.", examples=["Camera Monitoring"])
     description: str | None = Field(
         default=None,
@@ -116,7 +112,6 @@ class ServiceListOut(PaginatedResponse[ServiceOut]):
 class ServiceUpdate(MongoDTO):
     project_id: int | None = Field(default=None, description="Service project id.", examples=[1])
     group_id: int | None = Field(default=None, description="Service group id.", examples=[1])
-    code: str | None = Field(default=None, description="Service code.", examples=["it-support"])
     name: str | None = Field(default=None, description="Service display name.", examples=["IT Support"])
     description: str | None = Field(default=None, description="Service description.", examples=["Support service"])
     sort_order: int | None = Field(default=None, description="Sort order for listing.", examples=[30])
@@ -124,7 +119,6 @@ class ServiceUpdate(MongoDTO):
 
 
 class ServiceProjectHierarchyServiceOut(WithId, MongoDTO):
-    code: str = Field(..., description="Service code.", examples=["camera-monitoring"])
     name: str = Field(..., description="Service display name.", examples=["Camera Monitoring"])
     description: str | None = Field(default=None, description="Service description.")
     sort_order: int | None = Field(default=None, description="Sort order for listing.", examples=[10])
@@ -163,9 +157,7 @@ class CustomerServiceConfigOut(WithId, CustomerServiceConfigBase):
     project_id: int = Field(..., description="Service project id.", examples=[1])
     project_name: str = Field(..., description="Service project name.", examples=["Digital Transformation"])
     group_id: int = Field(..., description="Service group id.", examples=[1])
-    group_code: str = Field(..., description="Service group code.", examples=["security"])
     group_name: str = Field(..., description="Service group name.", examples=["Security"])
-    service_code: str = Field(..., description="Service code.", examples=["camera-monitoring"])
     service_name: str = Field(..., description="Service name.", examples=["Camera Monitoring"])
     service_is_active: bool = Field(..., description="Service active status.", examples=[True])
     created_at: datetime = Field(..., description="Creation timestamp.")
@@ -208,7 +200,6 @@ class CustomerPricingSummaryCustomer(MongoDTO):
 
 class CustomerPricingSummaryItem(MongoDTO):
     service_id: int = Field(..., description="Service id.", examples=[1])
-    service_code: str = Field(..., description="Service code.", examples=["camera-monitoring"])
     service_name: str = Field(..., description="Service name.", examples=["Camera Monitoring"])
     is_enabled: bool = Field(..., description="Enabled state for customer.", examples=[True])
     sale_price: int = Field(..., description="Configured sale price.", examples=[5000000])
@@ -228,7 +219,6 @@ class CustomerPricingSummaryGroup(MongoDTO):
     project_id: int = Field(..., description="Service project id.", examples=[1])
     project_name: str = Field(..., description="Service project name.", examples=["Digital Transformation"])
     group_id: int = Field(..., description="Service group id.", examples=[1])
-    group_code: str = Field(..., description="Service group code.", examples=["security"])
     group_name: str = Field(..., description="Service group name.", examples=["Security"])
     items: list[CustomerPricingSummaryItem] = Field(..., description="Group items.")
     totals: CustomerPricingSummaryGroupTotals = Field(..., description="Group totals.")

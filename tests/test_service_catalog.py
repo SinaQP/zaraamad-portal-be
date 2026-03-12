@@ -94,17 +94,16 @@ def _create_service_group(
     client: TestClient,
     headers: dict[str, str],
     *,
-    code: str,
+    code: str | None = None,
     name: str,
     project_id: int | None = None,
     sort_order: int = 10,
 ) -> int:
-    del project_id
+    del code, project_id
     response = client.post(
         "/service-groups",
         headers=headers,
         json={
-            "code": code,
             "name": name,
             "description": f"{name} services",
             "sort_order": sort_order,
@@ -120,24 +119,23 @@ def _create_service(
     *,
     project_id: int | None = None,
     group_id: int,
-    code: str,
+    code: str | None = None,
     name: str,
     sort_order: int = 10,
 ) -> int:
     resolved_project_id = project_id or _create_service_project(
         client=client,
         headers=headers,
-        code=f"{code}-project",
         name=f"{name} Project",
         sort_order=sort_order,
     )
+    del code
     response = client.post(
         "/services",
         headers=headers,
         json={
             "project_id": resolved_project_id,
             "group_id": group_id,
-            "code": code,
             "name": name,
             "description": f"{name} description",
             "sort_order": sort_order,
@@ -154,7 +152,6 @@ def test_create_service_group(client: TestClient, db_session: Session) -> None:
         "/service-groups",
         headers=headers,
         json={
-            "code": "security",
             "name": "Security",
             "description": "Security services",
             "sort_order": 1,
@@ -162,7 +159,7 @@ def test_create_service_group(client: TestClient, db_session: Session) -> None:
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["code"] == "security"
+    assert "code" not in data
     assert data["name"] == "Security"
     assert data["is_active"] is True
 
@@ -324,15 +321,14 @@ def test_update_service_group(client: TestClient, db_session: Session) -> None:
     assert data["sort_order"] == 20
 
 
-def test_duplicate_service_group_code_is_allowed(client: TestClient, db_session: Session) -> None:
+def test_duplicate_service_group_name_is_allowed(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
 
     first_response = client.post(
         "/service-groups",
         headers=headers,
         json={
-            "code": "shared-code",
-            "name": "Group One",
+            "name": "Shared Group",
             "description": None,
             "sort_order": 1,
         },
@@ -341,8 +337,7 @@ def test_duplicate_service_group_code_is_allowed(client: TestClient, db_session:
         "/service-groups",
         headers=headers,
         json={
-            "code": "shared-code",
-            "name": "Group Two",
+            "name": "Shared Group",
             "description": None,
             "sort_order": 2,
         },
@@ -427,7 +422,7 @@ def test_create_service_under_group_and_filter_by_group(
     assert len(services["items"]) == 1
     assert services["items"][0]["group_id"] == security_group_id
     assert services["items"][0]["project_id"] == security_project_id
-    assert services["items"][0]["group"]["code"] == "security"
+    assert services["items"][0]["group"]["name"] == "Security"
     assert services["items"][0]["project"]["name"] == "Security Project"
 
     project_filtered_response = client.get(
@@ -492,7 +487,7 @@ def test_update_service_group_assignment(client: TestClient, db_session: Session
     assert data["project"]["id"] == second_project_id
 
 
-def test_duplicate_service_code_is_allowed(client: TestClient, db_session: Session) -> None:
+def test_duplicate_service_name_is_allowed(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
     project_id = _create_service_project(
         client=client,
@@ -513,8 +508,7 @@ def test_duplicate_service_code_is_allowed(client: TestClient, db_session: Sessi
         json={
             "project_id": project_id,
             "group_id": group_id,
-            "code": "shared-service-code",
-            "name": "Service One",
+            "name": "Shared Service",
             "description": None,
             "sort_order": 1,
         },
@@ -525,8 +519,7 @@ def test_duplicate_service_code_is_allowed(client: TestClient, db_session: Sessi
         json={
             "project_id": project_id,
             "group_id": group_id,
-            "code": "shared-service-code",
-            "name": "Service Two",
+            "name": "Shared Service",
             "description": None,
             "sort_order": 2,
         },
@@ -666,7 +659,7 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
     service_search_data = service_search.json()
     assert service_search_data["total_page"] == 1
     assert len(service_search_data["items"]) == 1
-    assert service_search_data["items"][0]["code"] == "beta-service"
+    assert service_search_data["items"][0]["name"] == "Beta Service"
     assert service_search.headers["X-Total-Count"] == "1"
 
     project_service_search = client.get(
@@ -683,7 +676,7 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
         "/services",
         headers=headers,
         params={
-            "sort_by": "code",
+            "sort_by": "name",
             "sort_order": "desc",
             "page": 1,
             "page_size": 2,
@@ -693,8 +686,8 @@ def test_service_group_and_service_lists_support_search_sort_and_pagination(
     service_items = service_paged.json()
     assert service_items["total_page"] == 2
     assert len(service_items["items"]) == 2
-    assert service_items["items"][0]["code"] == "gamma-service"
-    assert service_items["items"][1]["code"] == "beta-service"
+    assert service_items["items"][0]["name"] == "Gamma Service"
+    assert service_items["items"][1]["name"] == "Beta Service"
     assert service_paged.headers["X-Total-Count"] == "3"
     assert service_paged.headers["X-Total-Pages"] == "2"
 
@@ -732,10 +725,10 @@ def test_get_all_service_groups_returns_all_items_without_pagination(
 
     items = response.json()
     assert len(items) == 3
-    assert [item["code"] for item in items] == [
-        "security",
-        "operations",
-        "support",
+    assert [item["name"] for item in items] == [
+        "Security",
+        "Operations",
+        "Support",
     ]
 
 
@@ -795,12 +788,12 @@ def test_service_project_hierarchy_lists_groups_and_services_by_project(
     second_project = item_map[second_project_id]
 
     assert len(first_project["groups"]) == 1
-    assert first_project["groups"][0]["code"] == "shared-hierarchy-group"
-    assert first_project["groups"][0]["services"][0]["code"] == "first-project-service"
+    assert first_project["groups"][0]["name"] == "Shared Hierarchy Group"
+    assert first_project["groups"][0]["services"][0]["name"] == "First Project Service"
 
     assert len(second_project["groups"]) == 1
-    assert second_project["groups"][0]["code"] == "shared-hierarchy-group"
-    assert second_project["groups"][0]["services"][0]["code"] == "second-project-service"
+    assert second_project["groups"][0]["name"] == "Shared Hierarchy Group"
+    assert second_project["groups"][0]["services"][0]["name"] == "Second Project Service"
 
     filtered_response = client.get(
         "/service-projects/hierarchy",
@@ -811,7 +804,7 @@ def test_service_project_hierarchy_lists_groups_and_services_by_project(
     filtered_items = filtered_response.json()
     assert len(filtered_items) == 1
     assert filtered_items[0]["id"] == second_project_id
-    assert filtered_items[0]["groups"][0]["services"][0]["code"] == "second-project-service"
+    assert filtered_items[0]["groups"][0]["services"][0]["name"] == "Second Project Service"
 
 
 def test_create_customer_service_config_and_list(
@@ -873,7 +866,7 @@ def test_create_customer_service_config_and_list(
     assert list_data["total_page"] == 1
     assert len(list_data["items"]) == 1
     assert list_data["items"][0]["project_name"] == "Security Project"
-    assert list_data["items"][0]["group_code"] == "security"
+    assert list_data["items"][0]["group_name"] == "Security"
 
 
 def test_customer_service_list_supports_filter_search_sort_and_pagination(
@@ -969,7 +962,7 @@ def test_customer_service_list_supports_filter_search_sort_and_pagination(
     assert filtered_items["total_page"] == 1
     assert len(filtered_items["items"]) == 1
     assert filtered_items["items"][0]["project_id"] == project_id
-    assert filtered_items["items"][0]["service_code"] == "fiber"
+    assert filtered_items["items"][0]["service_name"] == "Fiber"
     assert filtered_response.headers["X-Total-Count"] == "1"
 
     project_filtered_response = client.get(
@@ -1449,27 +1442,27 @@ def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
 
     groups = summary_data["groups"]
     assert len(groups) == 2
-    group_map = {item["group_code"]: item for item in groups}
+    group_map = {item["group_name"]: item for item in groups}
 
-    assert group_map["security"]["project_id"] == security_project_id
-    assert group_map["security"]["project_name"] == "Security Project"
-    assert group_map["security"]["totals"]["sale_total"] == 100
-    assert group_map["security"]["totals"]["support_total"] == 20
-    assert group_map["security"]["totals"]["grand_total"] == 120
-    assert group_map["infrastructure"]["project_id"] == infra_project_id
-    assert group_map["infrastructure"]["project_name"] == "Infrastructure Project"
-    assert group_map["infrastructure"]["totals"]["sale_total"] == 300
-    assert group_map["infrastructure"]["totals"]["support_total"] == 0
-    assert group_map["infrastructure"]["totals"]["grand_total"] == 300
+    assert group_map["Security"]["project_id"] == security_project_id
+    assert group_map["Security"]["project_name"] == "Security Project"
+    assert group_map["Security"]["totals"]["sale_total"] == 100
+    assert group_map["Security"]["totals"]["support_total"] == 20
+    assert group_map["Security"]["totals"]["grand_total"] == 120
+    assert group_map["Infrastructure"]["project_id"] == infra_project_id
+    assert group_map["Infrastructure"]["project_name"] == "Infrastructure Project"
+    assert group_map["Infrastructure"]["totals"]["sale_total"] == 300
+    assert group_map["Infrastructure"]["totals"]["support_total"] == 0
+    assert group_map["Infrastructure"]["totals"]["grand_total"] == 300
 
-    security_items = {item["service_code"]: item for item in group_map["security"]["items"]}
-    assert security_items["camera"]["line_sale_total"] == 0
-    assert security_items["camera"]["line_support_total"] == 0
-    assert security_items["camera"]["line_grand_total"] == 0
+    security_items = {item["service_name"]: item for item in group_map["Security"]["items"]}
+    assert security_items["Camera"]["line_sale_total"] == 0
+    assert security_items["Camera"]["line_support_total"] == 0
+    assert security_items["Camera"]["line_grand_total"] == 0
 
-    infra_items = {item["service_code"]: item for item in group_map["infrastructure"]["items"]}
-    assert infra_items["fiber"]["support_price"] is None
-    assert infra_items["fiber"]["line_support_total"] == 0
+    infra_items = {item["service_name"]: item for item in group_map["Infrastructure"]["items"]}
+    assert infra_items["Fiber"]["support_price"] is None
+    assert infra_items["Fiber"]["line_support_total"] == 0
 
 
 def test_admin_only_access_enforced_and_customer_access_denied(
@@ -1484,7 +1477,6 @@ def test_admin_only_access_enforced_and_customer_access_denied(
     unauthorized_response = client.post(
         "/service-groups",
         json={
-            "code": "unauthorized",
             "name": "Unauthorized",
             "description": None,
             "sort_order": 1,
@@ -1499,7 +1491,6 @@ def test_admin_only_access_enforced_and_customer_access_denied(
         "/service-groups",
         headers={"Authorization": f"Bearer {customer_token}"},
         json={
-            "code": "denied",
             "name": "Denied",
             "description": None,
             "sort_order": 1,

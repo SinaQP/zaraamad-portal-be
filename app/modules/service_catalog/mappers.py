@@ -27,7 +27,6 @@ class ServiceCatalogMapper:
     def to_service_group_info(self, group: ServiceGroup) -> ServiceGroupInfo:
         return ServiceGroupInfo(
             id=group.id,
-            code=group.code,
             name=group.name,
             is_active=group.is_active,
         )
@@ -35,7 +34,6 @@ class ServiceCatalogMapper:
     def to_service_group_out(self, group: ServiceGroup) -> ServiceGroupOut:
         return ServiceGroupOut(
             id=group.id,
-            code=group.code,
             name=group.name,
             description=group.description,
             sort_order=group.sort_order,
@@ -56,7 +54,6 @@ class ServiceCatalogMapper:
             id=service.id,
             project_id=service.project_id,
             group_id=service.group_id,
-            code=service.code,
             name=service.name,
             description=service.description,
             sort_order=service.sort_order,
@@ -70,7 +67,6 @@ class ServiceCatalogMapper:
     def to_service_project_hierarchy_service_out(self, service: Service) -> ServiceProjectHierarchyServiceOut:
         return ServiceProjectHierarchyServiceOut(
             id=service.id,
-            code=service.code,
             name=service.name,
             description=service.description,
             sort_order=service.sort_order,
@@ -121,9 +117,7 @@ class ServiceCatalogMapper:
             project_id=project.id,
             project_name=project.name,
             group_id=group.id,
-            group_code=group.code,
             group_name=group.name,
-            service_code=service.code,
             service_name=service.name,
             service_is_active=service.is_active,
             is_enabled=config.is_enabled,

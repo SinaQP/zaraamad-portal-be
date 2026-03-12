@@ -148,7 +148,6 @@ class ServiceProjectQueryBuilder:
 class ServiceGroupQueryBuilder:
     SORT_COLUMNS = {
         "id": ServiceGroup.id,
-        "code": ServiceGroup.code,
         "name": ServiceGroup.name,
         "sort_order": ServiceGroup.sort_order,
         "is_active": ServiceGroup.is_active,
@@ -172,7 +171,6 @@ class ServiceGroupQueryBuilder:
             search_pattern = f"%{search}%"
             query = query.where(
                 or_(
-                    ServiceGroup.code.ilike(search_pattern),
                     ServiceGroup.name.ilike(search_pattern),
                     ServiceGroup.description.ilike(search_pattern),
                 )
@@ -200,7 +198,6 @@ class ServiceQueryBuilder:
         "group_id": Service.group_id,
         "project_sort_order": ServiceProject.sort_order,
         "group_sort_order": ServiceGroup.sort_order,
-        "code": Service.code,
         "name": Service.name,
         "sort_order": Service.sort_order,
         "is_active": Service.is_active,
@@ -238,10 +235,8 @@ class ServiceQueryBuilder:
             search_pattern = f"%{search}%"
             query = query.where(
                 or_(
-                    Service.code.ilike(search_pattern),
                     Service.name.ilike(search_pattern),
                     Service.description.ilike(search_pattern),
-                    ServiceGroup.code.ilike(search_pattern),
                     ServiceGroup.name.ilike(search_pattern),
                     ServiceProject.name.ilike(search_pattern),
                 )
@@ -372,9 +367,7 @@ class CustomerServiceConfigQueryBuilder:
         "project_name": ServiceProject.name,
         "project_sort_order": ServiceProject.sort_order,
         "service_id": Service.id,
-        "service_code": Service.code,
         "service_name": Service.name,
-        "group_code": ServiceGroup.code,
         "group_name": ServiceGroup.name,
         "group_sort_order": ServiceGroup.sort_order,
         "service_sort_order": Service.sort_order,
@@ -417,9 +410,7 @@ class CustomerServiceConfigQueryBuilder:
             search_pattern = f"%{search}%"
             query = query.where(
                 or_(
-                    Service.code.ilike(search_pattern),
                     Service.name.ilike(search_pattern),
-                    ServiceGroup.code.ilike(search_pattern),
                     ServiceGroup.name.ilike(search_pattern),
                     ServiceProject.name.ilike(search_pattern),
                     CustomerServiceConfig.notes.ilike(search_pattern),
@@ -689,7 +680,6 @@ class CustomerPricingSummaryService:
                     project_id=project.id,
                     project_name=project.name,
                     group_id=group.id,
-                    group_code=group.code,
                     group_name=group.name,
                     items=[],
                     totals=CustomerPricingSummaryGroupTotals(
@@ -703,7 +693,6 @@ class CustomerPricingSummaryService:
             group_entry.items.append(
                 CustomerPricingSummaryItem(
                     service_id=service.id,
-                    service_code=service.code,
                     service_name=service.name,
                     is_enabled=config.is_enabled,
                     sale_price=config.sale_price,
@@ -774,7 +763,6 @@ class ServiceGroupService:
 
     def create(self, dto: ServiceGroupCreate) -> ServiceGroup:
         group = ServiceGroup(
-            code=dto.code,
             name=dto.name,
             description=dto.description,
             sort_order=dto.sort_order,
@@ -878,7 +866,6 @@ class ServiceCatalogService:
         service = Service(
             project_id=project.id,
             group_id=group.id,
-            code=dto.code,
             name=dto.name,
             description=dto.description,
             is_active=True,
