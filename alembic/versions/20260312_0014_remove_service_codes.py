@@ -1,7 +1,7 @@
 """remove service and service group codes
 
-Revision ID: 20260312_0013
-Revises: 20260312_0012
+Revision ID: 20260312_0014
+Revises: 20260312_0013
 Create Date: 2026-03-12 13:40:00
 """
 
@@ -10,8 +10,8 @@ from collections.abc import Sequence
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "20260312_0013"
-down_revision: str | None = "20260312_0012"
+revision: str = "20260312_0014"
+down_revision: str | None = "20260312_0013"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
