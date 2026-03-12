@@ -176,7 +176,7 @@ def get_service_project(
     service: ServiceProjectService = Depends(get_service_project_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> ServiceProjectOut:
-    project = service.get_or_404(project_id=project_id)
+    project = service.get_active_or_404(project_id=project_id)
     return mapper.to_service_project_out(project=project)
 
 
@@ -334,7 +334,7 @@ def get_service_group(
     service: ServiceGroupService = Depends(get_service_group_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> ServiceGroupOut:
-    group = service.get_or_404(group_id=group_id)
+    group = service.get_active_or_404(group_id=group_id)
     return mapper.to_service_group_out(group=group)
 
 
@@ -477,7 +477,7 @@ def get_service(
     service: ServiceCatalogService = Depends(get_service_catalog_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> ServiceOut:
-    item, group, project = service.get_or_404(service_id=service_id)
+    item, group, project = service.get_active_or_404(service_id=service_id)
     return mapper.to_service_out(service=item, group=group, project=project)
 
 

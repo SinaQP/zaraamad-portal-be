@@ -131,7 +131,7 @@ def get_customer(
     service: CustomerService = Depends(get_customer_service),
     mapper: CustomerMapper = Depends(get_customer_mapper),
 ) -> CustomerOut:
-    customer = service.get_or_404(customer_id=customer_id)
+    customer = service.get_active_or_404(customer_id=customer_id)
     return mapper.to_out(customer=customer)
 
 
@@ -199,7 +199,7 @@ def get_customer_bridge_config(
     service: CustomerBridgeConfigService = Depends(get_customer_bridge_config_service),
     mapper: CustomerMapper = Depends(get_customer_mapper),
 ) -> CustomerBridgeConfigOut:
-    customer, bridge_config = service.get(customer_id=customer_id)
+    customer, bridge_config = service.get_active(customer_id=customer_id)
     return mapper.to_bridge_config_out(
         customer=customer,
         bridge_config=bridge_config,

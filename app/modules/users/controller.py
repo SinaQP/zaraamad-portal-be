@@ -101,7 +101,7 @@ def get_user(
     service: UserService = Depends(get_user_service),
     mapper: UserMapper = Depends(get_user_mapper),
 ) -> UserOut:
-    user = service.get_or_404(user_id=user_id)
+    user = service.get_active_or_404(user_id=user_id)
     return mapper.to_out(user=user)
 
 

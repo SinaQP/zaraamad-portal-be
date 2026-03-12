@@ -83,6 +83,29 @@ class CustomerLookupService:
             "grade": customer_row["grade"],
         }
 
+    def get_active_or_404(self, customer_id: int) -> dict[str, int | str]:
+        customer_table = Base.metadata.tables["customers"]
+        customer_row = self._db_session.execute(
+            select(
+                customer_table.c.id,
+                customer_table.c.name,
+                customer_table.c.grade,
+            ).where(
+                customer_table.c.id == customer_id,
+                customer_table.c.is_active.is_(True),
+            )
+        ).mappings().first()
+        if customer_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=CUSTOMER_NOT_FOUND,
+            )
+        return {
+            "id": customer_row["id"],
+            "name": customer_row["name"],
+            "grade": customer_row["grade"],
+        }
+
 
 class ServiceProjectQueryBuilder:
     SORT_COLUMNS = {
@@ -102,7 +125,9 @@ class ServiceProjectQueryBuilder:
         sort_order: SortOrder,
     ) -> Select[tuple[ServiceProject]]:
         query = select(ServiceProject)
-        if is_active is not None:
+        if is_active is None:
+            query = query.where(ServiceProject.is_active.is_(True))
+        else:
             query = query.where(ServiceProject.is_active.is_(is_active))
         if search:
             search_pattern = f"%{search}%"
@@ -139,7 +164,9 @@ class ServiceGroupQueryBuilder:
         sort_order: SortOrder,
     ) -> Select[tuple[ServiceGroup]]:
         query = select(ServiceGroup)
-        if is_active is not None:
+        if is_active is None:
+            query = query.where(ServiceGroup.is_active.is_(True))
+        else:
             query = query.where(ServiceGroup.is_active.is_(is_active))
         if search:
             search_pattern = f"%{search}%"
@@ -194,12 +221,18 @@ class ServiceQueryBuilder:
             select(Service, ServiceGroup, ServiceProject)
             .join(ServiceGroup, ServiceGroup.id == Service.group_id)
             .join(ServiceProject, ServiceProject.id == Service.project_id)
+            .where(
+                ServiceGroup.is_active.is_(True),
+                ServiceProject.is_active.is_(True),
+            )
         )
         if project_id is not None:
             query = query.where(Service.project_id == project_id)
         if group_id is not None:
             query = query.where(Service.group_id == group_id)
-        if is_active is not None:
+        if is_active is None:
+            query = query.where(Service.is_active.is_(True))
+        else:
             query = query.where(Service.is_active.is_(is_active))
         if search:
             search_pattern = f"%{search}%"
@@ -280,7 +313,7 @@ class ServiceProjectService:
 
     def list_all(self) -> list[ServiceProject]:
         query = self._query_builder.build_list_query(
-            is_active=None,
+            is_active=True,
             search=None,
             sort_by="sort_order",
             sort_order=SortOrder.ASC,
@@ -290,6 +323,15 @@ class ServiceProjectService:
     def get_or_404(self, project_id: int) -> ServiceProject:
         project = self._db_session.get(ServiceProject, project_id)
         if project is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=SERVICE_PROJECT_NOT_FOUND,
+            )
+        return project
+
+    def get_active_or_404(self, project_id: int) -> ServiceProject:
+        project = self.get_or_404(project_id=project_id)
+        if not project.is_active:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=SERVICE_PROJECT_NOT_FOUND,
@@ -351,6 +393,8 @@ class CustomerServiceConfigQueryBuilder:
         search: str | None,
         sort_by: str,
         sort_order: SortOrder,
+        *,
+        only_active_relations: bool = False,
     ) -> Select[tuple[CustomerServiceConfig, Service, ServiceGroup, ServiceProject]]:
         query = (
             select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
@@ -359,6 +403,12 @@ class CustomerServiceConfigQueryBuilder:
             .join(ServiceProject, ServiceProject.id == Service.project_id)
             .where(CustomerServiceConfig.customer_id == customer_id)
         )
+        if only_active_relations:
+            query = query.where(
+                Service.is_active.is_(True),
+                ServiceGroup.is_active.is_(True),
+                ServiceProject.is_active.is_(True),
+            )
         if project_id is not None:
             query = query.where(Service.project_id == project_id)
         if is_enabled is not None:
@@ -460,7 +510,7 @@ class CustomerServiceConfigService:
         sort_order: SortOrder,
         pagination: PaginationParams,
     ) -> tuple[list[tuple[CustomerServiceConfig, Service, ServiceGroup, ServiceProject]], PaginationMeta]:
-        self._customer_lookup_service.get_or_404(customer_id=customer_id)
+        self._customer_lookup_service.get_active_or_404(customer_id=customer_id)
         query = self._query_builder.build_list_query(
             customer_id=customer_id,
             project_id=project_id,
@@ -468,6 +518,7 @@ class CustomerServiceConfigService:
             search=search,
             sort_by=sort_by,
             sort_order=sort_order,
+            only_active_relations=True,
         )
         total_count = int(
             self._db_session.scalar(
@@ -596,13 +647,18 @@ class CustomerPricingSummaryService:
         self._customer_lookup_service = CustomerLookupService(db_session=db_session)
 
     def get_summary(self, customer_id: int) -> CustomerPricingSummaryResult:
-        customer = self._customer_lookup_service.get_or_404(customer_id=customer_id)
+        customer = self._customer_lookup_service.get_active_or_404(customer_id=customer_id)
         rows = self._db_session.execute(
             select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
             .join(Service, Service.id == CustomerServiceConfig.service_id)
             .join(ServiceGroup, ServiceGroup.id == Service.group_id)
             .join(ServiceProject, ServiceProject.id == Service.project_id)
-            .where(CustomerServiceConfig.customer_id == customer_id)
+            .where(
+                CustomerServiceConfig.customer_id == customer_id,
+                Service.is_active.is_(True),
+                ServiceGroup.is_active.is_(True),
+                ServiceProject.is_active.is_(True),
+            )
             .order_by(
                 ServiceProject.sort_order.asc(),
                 ServiceGroup.sort_order.asc(),
@@ -759,7 +815,7 @@ class ServiceGroupService:
 
     def list_all(self) -> list[ServiceGroup]:
         query = self._query_builder.build_list_query(
-            is_active=None,
+            is_active=True,
             search=None,
             sort_by="sort_order",
             sort_order=SortOrder.ASC,
@@ -769,6 +825,15 @@ class ServiceGroupService:
     def get_or_404(self, group_id: int) -> ServiceGroup:
         group = self._db_session.get(ServiceGroup, group_id)
         if group is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=SERVICE_GROUP_NOT_FOUND,
+            )
+        return group
+
+    def get_active_or_404(self, group_id: int) -> ServiceGroup:
+        group = self.get_or_404(group_id=group_id)
+        if not group.is_active:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=SERVICE_GROUP_NOT_FOUND,
@@ -861,11 +926,19 @@ class ServiceCatalogService:
         if project_id is None:
             projects = list(
                 self._db_session.scalars(
-                    select(ServiceProject).order_by(ServiceProject.sort_order.asc(), ServiceProject.id.asc())
+                    select(ServiceProject)
+                    .where(ServiceProject.is_active.is_(True))
+                    .order_by(ServiceProject.sort_order.asc(), ServiceProject.id.asc())
                 ).all()
             )
         else:
-            projects = [self._get_project_or_404(project_id=project_id)]
+            project = self._get_project_or_404(project_id=project_id)
+            if not project.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=SERVICE_PROJECT_NOT_FOUND,
+                )
+            projects = [project]
 
         if not projects:
             return []
@@ -880,7 +953,12 @@ class ServiceCatalogService:
             select(Service, ServiceGroup, ServiceProject)
             .join(ServiceGroup, ServiceGroup.id == Service.group_id)
             .join(ServiceProject, ServiceProject.id == Service.project_id)
-            .where(Service.project_id.in_(project_ids))
+            .where(
+                Service.project_id.in_(project_ids),
+                Service.is_active.is_(True),
+                ServiceGroup.is_active.is_(True),
+                ServiceProject.is_active.is_(True),
+            )
             .order_by(
                 ServiceProject.sort_order.asc(),
                 ServiceProject.id.asc(),
@@ -912,6 +990,25 @@ class ServiceCatalogService:
             .join(ServiceGroup, ServiceGroup.id == Service.group_id)
             .join(ServiceProject, ServiceProject.id == Service.project_id)
             .where(Service.id == service_id)
+        ).first()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=SERVICE_NOT_FOUND,
+            )
+        return row[0], row[1], row[2]
+
+    def get_active_or_404(self, service_id: int) -> tuple[Service, ServiceGroup, ServiceProject]:
+        row = self._db_session.execute(
+            select(Service, ServiceGroup, ServiceProject)
+            .join(ServiceGroup, ServiceGroup.id == Service.group_id)
+            .join(ServiceProject, ServiceProject.id == Service.project_id)
+            .where(
+                Service.id == service_id,
+                Service.is_active.is_(True),
+                ServiceGroup.is_active.is_(True),
+                ServiceProject.is_active.is_(True),
+            )
         ).first()
         if row is None:
             raise HTTPException(

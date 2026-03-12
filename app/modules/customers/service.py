@@ -54,7 +54,9 @@ class CustomerQueryBuilder:
         sort_order: SortOrder,
     ) -> Select[tuple[Customer]]:
         query = select(Customer)
-        if is_active is not None:
+        if is_active is None:
+            query = query.where(Customer.is_active.is_(True))
+        else:
             query = query.where(Customer.is_active.is_(is_active))
         if search:
             query = query.where(Customer.name.ilike(f"%{search}%"))
@@ -118,12 +120,25 @@ class CustomerService:
         return items, meta
 
     def list_all(self) -> list[Customer]:
-        query = select(Customer).order_by(Customer.id.asc())
+        query = (
+            select(Customer)
+            .where(Customer.is_active.is_(True))
+            .order_by(Customer.id.asc())
+        )
         return list(self._db_session.scalars(query).all())
 
     def get_or_404(self, customer_id: int) -> Customer:
         customer = self._db_session.get(Customer, customer_id)
         if customer is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=CUSTOMER_NOT_FOUND,
+            )
+        return customer
+
+    def get_active_or_404(self, customer_id: int) -> Customer:
+        customer = self.get_or_404(customer_id=customer_id)
+        if not customer.is_active:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=CUSTOMER_NOT_FOUND,
@@ -165,6 +180,11 @@ class CustomerBridgeConfigService:
 
     def get(self, customer_id: int) -> tuple[Customer, CustomerBridgeConfig | None]:
         customer = self._customer_service.get_or_404(customer_id=customer_id)
+        bridge_config = self._db_session.get(CustomerBridgeConfig, customer_id)
+        return customer, bridge_config
+
+    def get_active(self, customer_id: int) -> tuple[Customer, CustomerBridgeConfig | None]:
+        customer = self._customer_service.get_active_or_404(customer_id=customer_id)
         bridge_config = self._db_session.get(CustomerBridgeConfig, customer_id)
         return customer, bridge_config
 
@@ -381,7 +401,7 @@ class CustomerBridgeService:
         customer_id: int,
         correlation_id: str | None,
     ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeRequest]:
-        customer, bridge_config = self._bridge_config_service.get(customer_id=customer_id)
+        customer, bridge_config = self._bridge_config_service.get_active(customer_id=customer_id)
         resolved_bridge_config = self._config_resolver.resolve(
             customer=customer,
             bridge_config=bridge_config,

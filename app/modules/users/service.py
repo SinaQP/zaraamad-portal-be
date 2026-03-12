@@ -43,7 +43,9 @@ class UserQueryBuilder:
             query = query.where(User.role == role)
         if customer_id is not None:
             query = query.where(User.customer_id == customer_id)
-        if is_active is not None:
+        if is_active is None:
+            query = query.where(User.is_active.is_(True))
+        else:
             query = query.where(User.is_active.is_(is_active))
         if search:
             search_pattern = f"%{search}%"
@@ -154,6 +156,15 @@ class UserService:
     def get_or_404(self, user_id: int) -> User:
         user = self._db_session.get(User, user_id)
         if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=USER_NOT_FOUND,
+            )
+        return user
+
+    def get_active_or_404(self, user_id: int) -> User:
+        user = self.get_or_404(user_id=user_id)
+        if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=USER_NOT_FOUND,

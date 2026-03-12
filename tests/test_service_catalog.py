@@ -1511,3 +1511,121 @@ def test_admin_only_access_enforced_and_customer_access_denied(
     assert customer_response.json()["developer_message"] == "Authenticated user does not have admin role."
 
 
+
+def test_inactive_service_catalog_records_are_hidden_from_get_apis(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
+    project_id = _create_service_project(
+        client=client,
+        headers=headers,
+        name="Hidden Project",
+        sort_order=1,
+    )
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="hidden-group",
+        name="Hidden Group",
+        sort_order=1,
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        project_id=project_id,
+        group_id=group_id,
+        code="hidden-service",
+        name="Hidden Service",
+        sort_order=1,
+    )
+
+    upsert_response = client.put(
+        f"/customers/{customer.id}/services",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "service_id": service_id,
+                    "is_enabled": True,
+                    "sale_price": 1500,
+                    "support_price": 150,
+                    "notes": "hidden later",
+                }
+            ]
+        },
+    )
+    assert upsert_response.status_code == 200
+
+    deactivate_service_response = client.delete(f"/services/{service_id}", headers=headers)
+    assert deactivate_service_response.status_code == 200
+
+    service_list_response = client.get(
+        "/services",
+        headers=headers,
+        params={"project_id": project_id},
+    )
+    assert service_list_response.status_code == 200
+    assert service_list_response.headers["X-Total-Count"] == "0"
+    assert service_list_response.json()["items"] == []
+
+    service_detail_response = client.get(f"/services/{service_id}", headers=headers)
+    assert service_detail_response.status_code == 404
+
+    customer_services_response = client.get(f"/customers/{customer.id}/services", headers=headers)
+    assert customer_services_response.status_code == 200
+    assert customer_services_response.headers["X-Total-Count"] == "0"
+    assert customer_services_response.json()["items"] == []
+
+    pricing_summary_response = client.get(f"/customers/{customer.id}/pricing-summary", headers=headers)
+    assert pricing_summary_response.status_code == 200
+    pricing_summary_data = pricing_summary_response.json()
+    assert pricing_summary_data["groups"] == []
+    assert pricing_summary_data["totals"] == {
+        "sale_total": 0,
+        "support_total": 0,
+        "grand_total": 0,
+    }
+
+    deactivate_group_response = client.delete(f"/service-groups/{group_id}", headers=headers)
+    assert deactivate_group_response.status_code == 200
+
+    group_list_response = client.get(
+        "/service-groups",
+        headers=headers,
+        params={"search": "Hidden Group"},
+    )
+    assert group_list_response.status_code == 200
+    assert group_list_response.headers["X-Total-Count"] == "0"
+    assert group_list_response.json()["items"] == []
+
+    group_all_response = client.get("/service-groups/all", headers=headers)
+    assert group_all_response.status_code == 200
+    assert group_all_response.json() == []
+
+    group_detail_response = client.get(f"/service-groups/{group_id}", headers=headers)
+    assert group_detail_response.status_code == 404
+
+    deactivate_project_response = client.delete(f"/service-projects/{project_id}", headers=headers)
+    assert deactivate_project_response.status_code == 200
+
+    project_list_response = client.get(
+        "/service-projects",
+        headers=headers,
+        params={"search": "Hidden Project"},
+    )
+    assert project_list_response.status_code == 200
+    assert project_list_response.headers["X-Total-Count"] == "0"
+    assert project_list_response.json()["items"] == []
+
+    project_all_response = client.get("/service-projects/all", headers=headers)
+    assert project_all_response.status_code == 200
+    assert project_all_response.json() == []
+
+    project_detail_response = client.get(f"/service-projects/{project_id}", headers=headers)
+    assert project_detail_response.status_code == 404
+
+    hierarchy_response = client.get("/service-projects/hierarchy", headers=headers)
+    assert hierarchy_response.status_code == 200
+    assert hierarchy_response.json() == []

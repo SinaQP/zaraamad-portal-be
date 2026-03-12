@@ -328,3 +328,72 @@ def test_customer_cannot_access_admin_endpoints(client: TestClient, db_session: 
     assert response.json()["detail"] == ADMIN_ACCESS_REQUIRED
     assert response.json()["developer_message"] == "Authenticated user does not have admin role."
 
+
+def test_inactive_users_and_customers_are_hidden_from_get_apis(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin = _create_admin(db_session=db_session)
+    admin_token = _login(client=client, mobile=admin.mobile)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    customer_response = client.post(
+        "/customers",
+        headers=admin_headers,
+        json={
+            "name": "Hidden Customer",
+            "grade": 4,
+        },
+    )
+    assert customer_response.status_code == 201
+    customer_id = customer_response.json()["id"]
+
+    user_response = client.post(
+        "/users",
+        headers=admin_headers,
+        json={
+            "full_name": "Hidden User",
+            "mobile": "09125556677",
+            "role": UserRole.CUSTOMER.value,
+            "customer_id": customer_id,
+        },
+    )
+    assert user_response.status_code == 201
+    user_id = user_response.json()["id"]
+
+    assert client.delete(f"/users/{user_id}", headers=admin_headers).status_code == 200
+    assert client.delete(f"/customers/{customer_id}", headers=admin_headers).status_code == 200
+
+    users_response = client.get(
+        "/users",
+        headers=admin_headers,
+        params={
+            "role": UserRole.CUSTOMER.value,
+            "customer_id": customer_id,
+        },
+    )
+    assert users_response.status_code == 200
+    assert users_response.headers["X-Total-Count"] == "0"
+    assert users_response.json()["items"] == []
+
+    user_detail_response = client.get(f"/users/{user_id}", headers=admin_headers)
+    assert user_detail_response.status_code == 404
+
+    customers_response = client.get(
+        "/customers",
+        headers=admin_headers,
+        params={"search": "Hidden Customer"},
+    )
+    assert customers_response.status_code == 200
+    assert customers_response.headers["X-Total-Count"] == "0"
+    assert customers_response.json()["items"] == []
+
+    all_customers_response = client.get("/customers/all", headers=admin_headers)
+    assert all_customers_response.status_code == 200
+    assert all_customers_response.json() == []
+
+    customer_detail_response = client.get(f"/customers/{customer_id}", headers=admin_headers)
+    assert customer_detail_response.status_code == 404
+
+    customer_bridge_response = client.get(f"/customers/{customer_id}/bridge", headers=admin_headers)
+    assert customer_bridge_response.status_code == 404
