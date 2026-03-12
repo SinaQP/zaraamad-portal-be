@@ -2,7 +2,7 @@
 
 Backend API for Zaraamad Portal Phase 1.
 
-Current release: `0.6.2`
+Current release: `0.7.0`
 
 ## Overview
 
@@ -14,6 +14,7 @@ This backend currently provides:
 - User management
 - Service project, group, and catalog management
 - Customer-specific service pricing and pricing summary
+- Subscription lifecycle and subscription message management
 - Standardized API error responses
 - Search, sorting, pagination, and soft deactivation
 
@@ -60,6 +61,7 @@ app/
     auth/
     customers/
     service_catalog/
+    subscriptions/
     users/
   main.py
   version.py
@@ -120,6 +122,7 @@ Key environment variables:
 - `OTP_DEV_MODE`: if `true`, API returns `dev_otp` in OTP response
 - `SMS_API_URL`: SMS provider endpoint
 - `SMS_REQUEST_TIMEOUT_SECONDS`: SMS request timeout
+- `BRIDGE_API_KEY`: shared secret used for bridge-authenticated API access
 - `SMS_PANEL_ORGANIZATION`: SMS panel organization
 - `SMS_PANEL_USERNAME`: SMS panel username
 - `SMS_PANEL_PASSWORD`: SMS panel password
@@ -264,6 +267,14 @@ Customer service configuration:
 - `PUT /customers/{customer_id}/services`
 - `PATCH /customer-service-configs/{config_id}`
 - `GET /customers/{customer_id}/pricing-summary`
+
+Subscriptions:
+
+- `POST /sub/subscription/`
+- `GET /sub/subscriptions/active/`
+- `PATCH /sub/subscriptions/active/`
+- `GET /sub/subscriptions/messages/`
+- `PATCH /sub/subscriptions/messages/`
 
 ## List, Search, and Pagination
 

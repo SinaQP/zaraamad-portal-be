@@ -16,6 +16,7 @@ from app.common.messages import HOME_WELCOME_TEMPLATE
 from app.modules.auth.module import router as auth_router
 from app.modules.customers.module import router as customer_router
 from app.modules.service_catalog.module import router as service_catalog_router
+from app.modules.subscriptions.module import router as subscription_router
 from app.modules.users.module import router as user_router
 
 OPENAPI_TAGS = [
@@ -55,6 +56,10 @@ OPENAPI_TAGS = [
         "name": "customer-pricing",
         "description": "Customer pricing summary endpoints.",
     },
+    {
+        "name": "subscriptions",
+        "description": "Subscription lifecycle and subscription message template endpoints.",
+    },
 ]
 
 
@@ -85,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(user_router)
     app.include_router(customer_router)
     app.include_router(service_catalog_router)
+    app.include_router(subscription_router)
     return app
 
 

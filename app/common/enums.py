@@ -13,3 +13,9 @@ class OtpPurpose(str, Enum):
 class SortOrder(str, Enum):
     ASC = "asc"
     DESC = "desc"
+
+
+class SubscriptionMessageStatus(str, Enum):
+    EXPIRED = "expired"
+    GRACE = "grace"
+    NEAR_EXPIRY = "near_expiry"
