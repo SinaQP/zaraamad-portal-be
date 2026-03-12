@@ -40,12 +40,44 @@ class SmsDeliveryError(SmsServiceError):
 class LoginOtpMessageBuilder:
     def build(self, otp_code: str) -> str:
         return (
-            f"کد تایید ورود شما: {otp_code}\n"
-            "این کد را در اختیار دیگران قرار ندهید."
+            f"\u06a9\u062f \u062a\u0627\u06cc\u06cc\u062f \u0648\u0631\u0648\u062f \u0634\u0645\u0627: {otp_code}\n"
+            "\u0627\u06cc\u0646 \u06a9\u062f \u0631\u0627 \u062f\u0631 \u0627\u062e\u062a\u06cc\u0627\u0631 \u062f\u06cc\u06af\u0631\u0627\u0646 \u0642\u0631\u0627\u0631 \u0646\u062f\u0647\u06cc\u062f."
         )
 
 
 class SmsService:
+    _SUCCESS_VALUES = {
+        "1",
+        "accepted",
+        "ok",
+        "queued",
+        "sent",
+        "success",
+        "successful",
+        "true",
+    }
+    _FAILURE_VALUES = {
+        "-1",
+        "0",
+        "error",
+        "fail",
+        "failed",
+        "false",
+        "invalid",
+        "not_sent",
+        "notsent",
+        "rejected",
+    }
+    _FAILURE_KEYWORDS = (
+        "error",
+        "fail",
+        "invalid",
+        "reject",
+        "not sent",
+        "notsent",
+        "unsuccess",
+    )
+
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
@@ -56,7 +88,8 @@ class SmsService:
             recipient=recipient,
             message=message,
         )
-        result = self._perform_request(request=request)
+        http_result = self._perform_request(request=request)
+        result = self._evaluate_result(result=http_result)
         if not result.ok:
             raise SmsDeliveryError(result=result)
         return result
@@ -111,6 +144,43 @@ class SmsService:
                 raw_response=str(exc),
             )
 
+    def _evaluate_result(self, result: SmsSendResult) -> SmsSendResult:
+        if result.status_code != 200:
+            return SmsSendResult(
+                ok=False,
+                status_code=result.status_code,
+                raw_response=result.raw_response,
+            )
+
+        payload = self._parse_json_payload(raw_response=result.raw_response)
+        if payload is not None:
+            delivery_state = self._extract_delivery_state(payload=payload)
+            if delivery_state is False:
+                return SmsSendResult(
+                    ok=False,
+                    status_code=result.status_code,
+                    raw_response=result.raw_response,
+                )
+            if delivery_state is True:
+                return SmsSendResult(
+                    ok=True,
+                    status_code=result.status_code,
+                    raw_response=result.raw_response,
+                )
+
+        if self._body_contains_failure_keywords(raw_body=result.raw_response):
+            return SmsSendResult(
+                ok=False,
+                status_code=result.status_code,
+                raw_response=result.raw_response,
+            )
+
+        return SmsSendResult(
+            ok=True,
+            status_code=result.status_code,
+            raw_response=result.raw_response,
+        )
+
     def _get_panel_config(self) -> SmsPanelConfig:
         organization = self._settings.sms_panel_organization
         username = self._settings.sms_panel_username
@@ -127,6 +197,67 @@ class SmsService:
             password=password,
             sender=sender,
         )
+
+    def _parse_json_payload(self, raw_response: str | None) -> object | None:
+        if raw_response is None:
+            return None
+        try:
+            return json.loads(raw_response)
+        except json.JSONDecodeError:
+            return None
+
+    def _extract_delivery_state(self, payload: object) -> bool | None:
+        indicators = list(self._iter_delivery_indicators(payload=payload))
+        if not indicators:
+            return None
+        if False in indicators:
+            return False
+        if True in indicators:
+            return True
+        return None
+
+    def _iter_delivery_indicators(self, payload: object):
+        if isinstance(payload, dict):
+            for key, value in payload.items():
+                normalized_key = str(key).strip().lower()
+                normalized_value = self._normalize_status_value(value=value)
+                if normalized_key in {
+                    "accepted",
+                    "delivery",
+                    "deliverystatus",
+                    "ok",
+                    "result",
+                    "sent",
+                    "status",
+                    "success",
+                } and normalized_value is not None:
+                    yield normalized_value
+                yield from self._iter_delivery_indicators(payload=value)
+            return
+        if isinstance(payload, list):
+            for item in payload:
+                yield from self._iter_delivery_indicators(payload=item)
+
+    def _normalize_status_value(self, value: object) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            return value > 0
+        if isinstance(value, float):
+            return value > 0
+        if isinstance(value, str):
+            normalized_value = value.strip().lower()
+            if normalized_value in self._SUCCESS_VALUES:
+                return True
+            if normalized_value in self._FAILURE_VALUES:
+                return False
+        return None
+
+    def _body_contains_failure_keywords(self, raw_body: str | None) -> bool:
+        if not raw_body:
+            return False
+        normalized_body = raw_body.strip().lower()
+        return any(keyword in normalized_body for keyword in self._FAILURE_KEYWORDS)
 
     def _decode_response_body(self, raw_body: bytes | str) -> str:
         if isinstance(raw_body, bytes):

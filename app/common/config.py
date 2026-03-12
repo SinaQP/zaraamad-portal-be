@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Any
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.version import VERSION as BUILD_VERSION
@@ -25,9 +25,18 @@ class Settings(BaseSettings):
     sms_request_timeout_seconds: int = 15
     bridge_request_timeout_seconds: int = 10
     bridge_api_key: str = "change-me-bridge-key"
-    sms_panel_organization: str | None = None
-    sms_panel_username: str | None = None
-    sms_panel_password: str | None = None
+    sms_panel_organization: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SMS_PANEL_ORGANIZATION", "API_ORGANIZATION"),
+    )
+    sms_panel_username: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SMS_PANEL_USERNAME", "API_USERNAME"),
+    )
+    sms_panel_password: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SMS_PANEL_PASSWORD", "API_PASSWORD"),
+    )
     sms_panel_sender: str = "9820002739006"
     seed_admin_full_name: str = "System Admin"
     seed_admin_mobile: str = "09120000000"
@@ -37,7 +46,11 @@ class Settings(BaseSettings):
     )
     cors_allow_credentials: bool = True
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        populate_by_name=True,
+    )
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod
