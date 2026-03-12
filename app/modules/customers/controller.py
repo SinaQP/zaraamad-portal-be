@@ -21,11 +21,15 @@ from app.modules.customers.service import (
     get_customer_service,
 )
 
-router = APIRouter(prefix="/customers", tags=["customers"])
+CUSTOMERS_TAG = "customers"
+CUSTOMER_BRIDGE_TAG = "customer-bridge"
+
+router = APIRouter(prefix="/customers")
 
 
 @router.post(
     "",
+    tags=[CUSTOMERS_TAG],
     response_model=CustomerOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create customer",
@@ -48,6 +52,7 @@ def create_customer(
 
 @router.get(
     "",
+    tags=[CUSTOMERS_TAG],
     response_model=CustomerListOut,
     summary="List customers",
     description="Return customers with optional active-state filtering.",
@@ -86,6 +91,7 @@ def list_customers(
 
 @router.get(
     "/all",
+    tags=[CUSTOMERS_TAG],
     response_model=list[CustomerOut],
     summary="Get all customers",
     description="Return all customers without filters, search, sorting, or pagination.",
@@ -105,6 +111,7 @@ def get_all_customers(
 
 @router.get(
     "/{customer_id}",
+    tags=[CUSTOMERS_TAG],
     response_model=CustomerOut,
     summary="Get customer by id",
     description="Return a customer by its id.",
@@ -126,6 +133,7 @@ def get_customer(
 
 @router.patch(
     "/{customer_id}",
+    tags=[CUSTOMERS_TAG],
     response_model=CustomerOut,
     summary="Update customer",
     description="Partially update a customer by id.",
@@ -149,6 +157,7 @@ def update_customer(
 
 @router.delete(
     "/{customer_id}",
+    tags=[CUSTOMERS_TAG],
     response_model=CustomerOut,
     summary="Deactivate customer",
     description="Soft delete customer by setting is_active=false.",
@@ -170,6 +179,7 @@ def deactivate_customer(
 
 @router.get(
     "/{customer_id}/bridge/health",
+    tags=[CUSTOMER_BRIDGE_TAG],
     response_model=CustomerBridgeHealthOut,
     summary="Get customer bridge health",
     description="Call the configured municipality bridge health endpoint for a customer.",
@@ -205,6 +215,7 @@ def get_customer_bridge_health(
 
 @router.get(
     "/{customer_id}/bridge/capabilities",
+    tags=[CUSTOMER_BRIDGE_TAG],
     response_model=CustomerBridgeCapabilitiesOut,
     summary="Get customer bridge capabilities",
     description="Call the configured municipality bridge capabilities endpoint for a customer.",

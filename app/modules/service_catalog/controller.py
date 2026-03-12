@@ -39,11 +39,18 @@ from app.modules.service_catalog.service import (
     get_service_project_service,
 )
 
-router = APIRouter(tags=["service-catalog"])
+SERVICE_PROJECTS_TAG = "service-projects"
+SERVICE_GROUPS_TAG = "service-groups"
+SERVICES_TAG = "services"
+CUSTOMER_SERVICE_CONFIGS_TAG = "customer-service-configs"
+CUSTOMER_PRICING_TAG = "customer-pricing"
+
+router = APIRouter()
 
 
 @router.post(
     "/service-projects",
+    tags=[SERVICE_PROJECTS_TAG],
     response_model=ServiceProjectOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create service project",
@@ -66,6 +73,7 @@ def create_service_project(
 
 @router.get(
     "/service-projects",
+    tags=[SERVICE_PROJECTS_TAG],
     response_model=ServiceProjectListOut,
     summary="List service projects",
     description="Return service projects with optional active-state filtering.",
@@ -104,6 +112,7 @@ def list_service_projects(
 
 @router.get(
     "/service-projects/all",
+    tags=[SERVICE_PROJECTS_TAG],
     response_model=list[ServiceProjectOut],
     summary="Get all service projects",
     description="Return all service projects without pagination for select inputs.",
@@ -123,6 +132,7 @@ def get_all_service_projects(
 
 @router.get(
     "/service-projects/hierarchy",
+    tags=[SERVICE_PROJECTS_TAG],
     response_model=list[ServiceProjectHierarchyProjectOut],
     summary="List service hierarchy by project",
     description="Return projects and nest their groups and services under each project.",
@@ -150,6 +160,7 @@ def list_service_project_hierarchy(
 
 @router.get(
     "/service-projects/{project_id}",
+    tags=[SERVICE_PROJECTS_TAG],
     response_model=ServiceProjectOut,
     summary="Get service project",
     description="Return a service project by id.",
@@ -171,6 +182,7 @@ def get_service_project(
 
 @router.patch(
     "/service-projects/{project_id}",
+    tags=[SERVICE_PROJECTS_TAG],
     response_model=ServiceProjectOut,
     summary="Update service project",
     description="Partially update a service project by id.",
@@ -194,6 +206,7 @@ def update_service_project(
 
 @router.delete(
     "/service-projects/{project_id}",
+    tags=[SERVICE_PROJECTS_TAG],
     response_model=ServiceProjectOut,
     summary="Deactivate service project",
     description="Soft delete service project by setting is_active=false.",
@@ -215,6 +228,7 @@ def deactivate_service_project(
 
 @router.post(
     "/service-groups",
+    tags=[SERVICE_GROUPS_TAG],
     response_model=ServiceGroupOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create service group",
@@ -237,6 +251,7 @@ def create_service_group(
 
 @router.get(
     "/service-groups",
+    tags=[SERVICE_GROUPS_TAG],
     response_model=ServiceGroupListOut,
     summary="List service groups",
     description="Return service groups with optional active-state filtering.",
@@ -283,6 +298,7 @@ def list_service_groups(
 
 @router.get(
     "/service-groups/all",
+    tags=[SERVICE_GROUPS_TAG],
     response_model=list[ServiceGroupOut],
     summary="Get all service groups",
     description="Return all service groups without pagination for select inputs.",
@@ -302,6 +318,7 @@ def get_all_service_groups(
 
 @router.get(
     "/service-groups/{group_id}",
+    tags=[SERVICE_GROUPS_TAG],
     response_model=ServiceGroupOut,
     summary="Get service group",
     description="Return a service group by id.",
@@ -323,6 +340,7 @@ def get_service_group(
 
 @router.patch(
     "/service-groups/{group_id}",
+    tags=[SERVICE_GROUPS_TAG],
     response_model=ServiceGroupOut,
     summary="Update service group",
     description="Partially update a service group by id.",
@@ -346,6 +364,7 @@ def update_service_group(
 
 @router.delete(
     "/service-groups/{group_id}",
+    tags=[SERVICE_GROUPS_TAG],
     response_model=ServiceGroupOut,
     summary="Deactivate service group",
     description="Soft delete service group by setting is_active=false.",
@@ -367,6 +386,7 @@ def deactivate_service_group(
 
 @router.post(
     "/services",
+    tags=[SERVICES_TAG],
     response_model=ServiceOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create service catalog item",
@@ -389,6 +409,7 @@ def create_service(
 
 @router.get(
     "/services",
+    tags=[SERVICES_TAG],
     response_model=ServiceListOut,
     summary="List service catalog items",
     description="Return global services with optional project, group, and active-state filtering.",
@@ -440,6 +461,7 @@ def list_services(
 
 @router.get(
     "/services/{service_id}",
+    tags=[SERVICES_TAG],
     response_model=ServiceOut,
     summary="Get service catalog item",
     description="Return a service catalog item by id.",
@@ -461,6 +483,7 @@ def get_service(
 
 @router.patch(
     "/services/{service_id}",
+    tags=[SERVICES_TAG],
     response_model=ServiceOut,
     summary="Update service catalog item",
     description="Partially update a service catalog item by id.",
@@ -484,6 +507,7 @@ def update_service(
 
 @router.delete(
     "/services/{service_id}",
+    tags=[SERVICES_TAG],
     response_model=ServiceOut,
     summary="Deactivate service catalog item",
     description="Soft delete service by setting is_active=false.",
@@ -505,6 +529,7 @@ def deactivate_service(
 
 @router.get(
     "/customers/{customer_id}/services",
+    tags=[CUSTOMER_SERVICE_CONFIGS_TAG],
     response_model=CustomerServiceConfigListOut,
     summary="List customer service configs",
     description="Return all configured services for a customer with project, group, price, and enabled status.",
@@ -565,6 +590,7 @@ def list_customer_services(
 
 @router.put(
     "/customers/{customer_id}/services",
+    tags=[CUSTOMER_SERVICE_CONFIGS_TAG],
     response_model=list[CustomerServiceConfigOut],
     summary="Bulk upsert customer service configs",
     description=(
@@ -595,6 +621,7 @@ def bulk_upsert_customer_services(
 
 @router.patch(
     "/customer-service-configs/{config_id}",
+    tags=[CUSTOMER_SERVICE_CONFIGS_TAG],
     response_model=CustomerServiceConfigOut,
     summary="Update customer service config",
     description="Update a single customer service config row by id.",
@@ -618,6 +645,7 @@ def update_customer_service_config(
 
 @router.get(
     "/customers/{customer_id}/pricing-summary",
+    tags=[CUSTOMER_PRICING_TAG],
     response_model=CustomerPricingSummaryResult,
     summary="Get customer pricing summary",
     description="Return customer service configuration and aggregate totals for pricing.",

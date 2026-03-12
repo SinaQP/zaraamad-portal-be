@@ -18,6 +18,45 @@ from app.modules.customers.module import router as customer_router
 from app.modules.service_catalog.module import router as service_catalog_router
 from app.modules.users.module import router as user_router
 
+OPENAPI_TAGS = [
+    {
+        "name": "auth",
+        "description": "Authentication and current-user access endpoints.",
+    },
+    {
+        "name": "users",
+        "description": "Administrative user management endpoints.",
+    },
+    {
+        "name": "customers",
+        "description": "Customer management endpoints.",
+    },
+    {
+        "name": "customer-bridge",
+        "description": "Customer bridge health and capability endpoints.",
+    },
+    {
+        "name": "service-projects",
+        "description": "Service project setup and project hierarchy endpoints.",
+    },
+    {
+        "name": "service-groups",
+        "description": "Reusable service group management endpoints.",
+    },
+    {
+        "name": "services",
+        "description": "Service catalog item management endpoints.",
+    },
+    {
+        "name": "customer-service-configs",
+        "description": "Customer-specific service enablement and pricing endpoints.",
+    },
+    {
+        "name": "customer-pricing",
+        "description": "Customer pricing summary endpoints.",
+    },
+]
+
 
 def create_app() -> FastAPI:
     settings = get_settings()
@@ -25,6 +64,7 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         description="Zaraamad Portal backend APIs.",
         version=settings.app_version,
+        openapi_tags=OPENAPI_TAGS,
     )
     app.add_exception_handler(
         RequestValidationError,
