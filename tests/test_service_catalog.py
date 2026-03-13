@@ -6,6 +6,7 @@ from app.common.messages import (
     ADMIN_ACCESS_REQUIRED,
     DUPLICATE_SERVICE_ID_IN_PAYLOAD,
     MISSING_AUTH_TOKEN,
+    SUPPORT_PRICE_CANNOT_BE_NULL,
     VALIDATION_ERROR_MESSAGE,
 )
 from app.modules.customers.schemas import Customer
@@ -941,7 +942,7 @@ def test_customer_service_list_supports_filter_search_sort_and_pagination(
                     "service_id": service_c,
                     "is_enabled": True,
                     "sale_price": 3000,
-                    "support_price": None,
+                    "support_price": 0,
                     "notes": "fiber enabled",
                 },
             ]
@@ -1070,7 +1071,7 @@ def test_bulk_upsert_customer_service_configs_omitted_items_remain_unchanged(
                     "service_id": service_c,
                     "is_enabled": True,
                     "sale_price": 3000000,
-                    "support_price": None,
+                    "support_price": 0,
                     "notes": "C1",
                 },
             ]
@@ -1119,14 +1120,14 @@ def test_duplicate_customer_service_pair_is_rejected(
                     "service_id": service_id,
                     "is_enabled": True,
                     "sale_price": 1000,
-                    "support_price": None,
+                    "support_price": 0,
                     "notes": None,
                 },
                 {
                     "service_id": service_id,
                     "is_enabled": False,
                     "sale_price": 1200,
-                    "support_price": None,
+                    "support_price": 0,
                     "notes": None,
                 },
             ]
@@ -1138,21 +1139,21 @@ def test_duplicate_customer_service_pair_is_rejected(
     assert response.json()["developer_message"] == "The payload contains duplicate service_id values."
 
 
-def test_sale_price_is_required(client: TestClient, db_session: Session) -> None:
+def test_support_price_is_required(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
     customer = _create_customer_entity(db_session=db_session)
     group_id = _create_service_group(
         client=client,
         headers=headers,
-        code="required-sale",
-        name="Required Sale",
+        code="required-support",
+        name="Required Support",
     )
     service_id = _create_service(
         client=client,
         headers=headers,
         group_id=group_id,
-        code="required-sale-service",
-        name="Required Sale Service",
+        code="required-support-service",
+        name="Required Support Service",
     )
 
     response = client.put(
@@ -1163,7 +1164,7 @@ def test_sale_price_is_required(client: TestClient, db_session: Session) -> None
                 {
                     "service_id": service_id,
                     "is_enabled": True,
-                    "support_price": 100,
+                    "sale_price": 100,
                     "notes": None,
                 }
             ]
@@ -1211,21 +1212,21 @@ def test_negative_sale_price_is_rejected(client: TestClient, db_session: Session
     assert response.json()["detail"][0]["msg"] == "\u0645\u0642\u062f\u0627\u0631 \u0628\u0627\u06cc\u062f \u0628\u0632\u0631\u06af \u062a\u0631 \u06cc\u0627 \u0645\u0633\u0627\u0648\u06cc 0 \u0628\u0627\u0634\u062f."
 
 
-def test_null_support_price_is_accepted(client: TestClient, db_session: Session) -> None:
+def test_sale_price_can_be_omitted(client: TestClient, db_session: Session) -> None:
     headers = _admin_headers(client=client, db_session=db_session)
     customer = _create_customer_entity(db_session=db_session)
     group_id = _create_service_group(
         client=client,
         headers=headers,
-        code="nullable-support",
-        name="Nullable Support",
+        code="optional-sale",
+        name="Optional Sale",
     )
     service_id = _create_service(
         client=client,
         headers=headers,
         group_id=group_id,
-        code="nullable-support-service",
-        name="Nullable Support Service",
+        code="optional-sale-service",
+        name="Optional Sale Service",
     )
 
     response = client.put(
@@ -1236,15 +1237,14 @@ def test_null_support_price_is_accepted(client: TestClient, db_session: Session)
                 {
                     "service_id": service_id,
                     "is_enabled": True,
-                    "sale_price": 2500,
-                    "support_price": None,
+                    "support_price": 2500,
                     "notes": None,
                 }
             ]
         },
     )
     assert response.status_code == 200
-    assert response.json()[0]["support_price"] is None
+    assert response.json()[0]["sale_price"] is None
 
 
 def test_negative_support_price_is_rejected(client: TestClient, db_session: Session) -> None:
@@ -1322,17 +1322,66 @@ def test_patch_single_customer_service_config(client: TestClient, db_session: Se
         headers=headers,
         json={
             "is_enabled": False,
-            "sale_price": 2500,
-            "support_price": None,
+            "sale_price": None,
+            "support_price": 250,
             "notes": "v2",
         },
     )
     assert patch_response.status_code == 200
     patch_data = patch_response.json()
     assert patch_data["is_enabled"] is False
-    assert patch_data["sale_price"] == 2500
-    assert patch_data["support_price"] is None
+    assert patch_data["sale_price"] is None
+    assert patch_data["support_price"] == 250
     assert patch_data["notes"] == "v2"
+
+
+def test_patch_single_customer_service_config_rejects_null_support_price(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="patch-null-support-group",
+        name="Patch Null Support Group",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="patch-null-support-service",
+        name="Patch Null Support Service",
+    )
+
+    create_response = client.put(
+        f"/customers/{customer.id}/services",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "service_id": service_id,
+                    "is_enabled": True,
+                    "sale_price": 1000,
+                    "support_price": 200,
+                    "notes": "v1",
+                }
+            ]
+        },
+    )
+    assert create_response.status_code == 200
+    config_id = create_response.json()[0]["id"]
+
+    patch_response = client.patch(
+        f"/customer-service-configs/{config_id}",
+        headers=headers,
+        json={
+            "support_price": None,
+        },
+    )
+    assert patch_response.status_code == 422
+    assert patch_response.json()["detail"] == SUPPORT_PRICE_CANNOT_BE_NULL
 
 
 def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
@@ -1421,7 +1470,7 @@ def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
                     "service_id": service_fiber,
                     "is_enabled": True,
                     "sale_price": 300,
-                    "support_price": None,
+                    "support_price": 0,
                     "notes": None,
                 },
             ]
@@ -1461,7 +1510,7 @@ def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
     assert security_items["Camera"]["line_grand_total"] == 0
 
     infra_items = {item["service_name"]: item for item in group_map["Infrastructure"]["items"]}
-    assert infra_items["Fiber"]["support_price"] is None
+    assert infra_items["Fiber"]["support_price"] == 0
     assert infra_items["Fiber"]["line_support_total"] == 0
 
 

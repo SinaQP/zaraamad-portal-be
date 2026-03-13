@@ -20,11 +20,11 @@ from app.common.messages import (
     INACTIVE_SERVICE_CANNOT_BE_ASSIGNED,
     PROJECT_ID_CANNOT_BE_NULL,
     PROJECT_ID_INVALID,
-    SALE_PRICE_CANNOT_BE_NULL,
     SERVICE_GROUP_NOT_FOUND,
     SERVICE_ID_INVALID,
     SERVICE_NOT_FOUND,
     SERVICE_PROJECT_NOT_FOUND,
+    SUPPORT_PRICE_CANNOT_BE_NULL,
 )
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.modules.service_catalog.dtos import (
@@ -576,10 +576,10 @@ class CustomerServiceConfigService:
                 detail=CUSTOMER_SERVICE_CONFIG_NOT_FOUND,
             )
         update_data = dto.model_dump(exclude_unset=True, exclude_none=False)
-        if "sale_price" in update_data and update_data["sale_price"] is None:
+        if "support_price" in update_data and update_data["support_price"] is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=SALE_PRICE_CANNOT_BE_NULL,
+                detail=SUPPORT_PRICE_CANNOT_BE_NULL,
             )
         for field_name, field_value in update_data.items():
             setattr(config, field_name, field_value)
@@ -668,8 +668,9 @@ class CustomerPricingSummaryService:
             group: ServiceGroup = row[2]
             project: ServiceProject = row[3]
 
-            support_price_value = config.support_price or 0
-            line_sale_total = config.sale_price if config.is_enabled else 0
+            sale_price_value = config.sale_price if config.sale_price is not None else 0
+            support_price_value = config.support_price
+            line_sale_total = sale_price_value if config.is_enabled else 0
             line_support_total = support_price_value if config.is_enabled else 0
             line_grand_total = line_sale_total + line_support_total
 

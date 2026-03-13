@@ -43,7 +43,7 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.GROUP_ID_CANNOT_BE_NULL: "The group reference was not provided.",
     messages.GROUP_ID_INVALID: "The supplied group_id does not exist.",
     messages.SERVICE_ID_INVALID: "The supplied service_id does not exist.",
-    messages.SALE_PRICE_CANNOT_BE_NULL: "The sale_price field was explicitly set to null.",
+    messages.SUPPORT_PRICE_CANNOT_BE_NULL: "The support_price field was explicitly set to null.",
     messages.DUPLICATE_SERVICE_ID_IN_PAYLOAD: "The payload contains duplicate service_id values.",
     messages.DUPLICATE_CUSTOMER_SERVICE_CONFIGURATION: (
         "A duplicate customer/service configuration violated a unique constraint."

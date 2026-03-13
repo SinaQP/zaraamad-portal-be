@@ -302,8 +302,8 @@ Pagination metadata is returned in response headers:
 - `services.group_id` is required
 - `service_groups.code` can be duplicated
 - `services.code` can be duplicated
-- `sale_price` is required and must be non-negative
-- `support_price` is optional and may be `null`
+- `sale_price` is optional and, when provided, must be non-negative
+- `support_price` is required and must be non-negative
 - bulk upsert on `PUT /customers/{customer_id}/services` works by `service_id`
 - omitted items in a bulk upsert remain unchanged
 - service, group, customer-config, and pricing-summary responses include project information
@@ -395,7 +395,6 @@ curl -X PUT http://localhost:8000/customers/1/services \
       {
         "service_id": 10,
         "is_enabled": true,
-        "sale_price": 5000000,
         "support_price": 1500000,
         "notes": "Initial setup"
       }

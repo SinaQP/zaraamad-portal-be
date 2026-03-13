@@ -52,9 +52,12 @@ class CustomerServiceConfig(Base, TimestampMixin):
             "service_id",
             name="uq_customer_service_configs_customer_service",
         ),
-        CheckConstraint("sale_price >= 0", name="ck_customer_service_configs_non_negative_sale_price"),
         CheckConstraint(
-            "support_price IS NULL OR support_price >= 0",
+            "sale_price IS NULL OR sale_price >= 0",
+            name="ck_customer_service_configs_non_negative_sale_price",
+        ),
+        CheckConstraint(
+            "support_price >= 0",
             name="ck_customer_service_configs_non_negative_support_price",
         ),
     )
@@ -71,6 +74,6 @@ class CustomerServiceConfig(Base, TimestampMixin):
         index=True,
     )
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
-    sale_price: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    support_price: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    sale_price: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    support_price: Mapped[int] = mapped_column(BigInteger, nullable=False)
     notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)

@@ -138,9 +138,14 @@ class ServiceProjectHierarchyProjectOut(ServiceProjectOut):
 class CustomerServiceConfigBase(MongoDTO):
     service_id: int = Field(..., description="Service id.", examples=[1])
     is_enabled: bool = Field(..., description="Service enabled for customer.", examples=[True])
-    sale_price: int = Field(..., ge=0, description="Sale price in smallest money unit.", examples=[5000000])
-    support_price: int | None = Field(
+    sale_price: int | None = Field(
         default=None,
+        ge=0,
+        description="Sale price in smallest money unit.",
+        examples=[5000000],
+    )
+    support_price: int = Field(
+        ...,
         ge=0,
         description="Support price in smallest money unit.",
         examples=[1500000],
@@ -202,8 +207,8 @@ class CustomerPricingSummaryItem(MongoDTO):
     service_id: int = Field(..., description="Service id.", examples=[1])
     service_name: str = Field(..., description="Service name.", examples=["Camera Monitoring"])
     is_enabled: bool = Field(..., description="Enabled state for customer.", examples=[True])
-    sale_price: int = Field(..., description="Configured sale price.", examples=[5000000])
-    support_price: int | None = Field(default=None, description="Configured support price.", examples=[1500000])
+    sale_price: int | None = Field(default=None, description="Configured sale price.", examples=[5000000])
+    support_price: int = Field(..., description="Configured support price.", examples=[1500000])
     line_sale_total: int = Field(..., description="Line sale total.", examples=[5000000])
     line_support_total: int = Field(..., description="Line support total.", examples=[1500000])
     line_grand_total: int = Field(..., description="Line grand total.", examples=[6500000])
