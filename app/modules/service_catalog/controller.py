@@ -2,15 +2,20 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
+from app.common.dtos import CurrentUser
 from app.common.enums import SortOrder
 from app.common.pagination import PaginationParams, get_pagination_params, set_pagination_headers
-from app.common.security.dependencies import require_admin
+from app.common.security.dependencies import get_current_user, require_admin
 from app.modules.service_catalog.dtos import (
     CustomerServiceConfigListOut,
-    CustomerPricingSummaryResult,
     CustomerServiceConfigBulkUpsertCreate,
     CustomerServiceConfigOut,
     CustomerServiceConfigUpdate,
+    CustomerPricingSummaryResult,
+    CustomerServicePurchaseCreate,
+    CustomerServicePurchaseListOut,
+    CustomerServicePurchaseOut,
+    CustomerServicePurchaseUpdate,
     ServiceCreate,
     ServiceGroupListOut,
     ServiceGroupCreate,
@@ -29,11 +34,13 @@ from app.modules.service_catalog.mappers import ServiceCatalogMapper, get_servic
 from app.modules.service_catalog.service import (
     CustomerPricingSummaryService,
     CustomerServiceConfigService,
+    CustomerServicePurchaseService,
     ServiceCatalogService,
     ServiceGroupService,
     ServiceProjectService,
     get_customer_pricing_summary_service,
     get_customer_service_config_service,
+    get_customer_service_purchase_service,
     get_service_catalog_service,
     get_service_group_service,
     get_service_project_service,
@@ -43,6 +50,7 @@ SERVICE_PROJECTS_TAG = "service-projects"
 SERVICE_GROUPS_TAG = "service-groups"
 SERVICES_TAG = "services"
 CUSTOMER_SERVICE_CONFIGS_TAG = "customer-service-configs"
+CUSTOMER_SERVICE_PURCHASES_TAG = "customer-service-purchases"
 CUSTOMER_PRICING_TAG = "customer-pricing"
 
 router = APIRouter()
@@ -530,10 +538,11 @@ def deactivate_service(
     tags=[CUSTOMER_SERVICE_CONFIGS_TAG],
     response_model=CustomerServiceConfigListOut,
     summary="List customer service configs",
-    description="Return all configured services for a customer with project, group, price, and enabled status.",
+    description="Return all configured services for a customer with project, group, price, and enabled status. Accessible by admin users and the owning customer user.",
     responses={
         200: {"description": "Customer service configs returned."},
-        403: {"description": "Admin access required."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
         404: {"description": "Customer not found."},
     },
 )
@@ -561,7 +570,7 @@ def list_customer_services(
     ] = Query(default="project_sort_order", description="Sort field."),
     sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
     pagination: PaginationParams = Depends(get_pagination_params),
-    _: object = Depends(require_admin),
+    current_user: CurrentUser = Depends(get_current_user),
     service: CustomerServiceConfigService = Depends(get_customer_service_config_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> CustomerServiceConfigListOut:
@@ -573,6 +582,7 @@ def list_customer_services(
         sort_by=sort_by,
         sort_order=sort_order,
         pagination=pagination,
+        current_user=current_user,
     )
     set_pagination_headers(response=response, meta=meta)
     return CustomerServiceConfigListOut(
@@ -637,6 +647,208 @@ def update_customer_service_config(
 ) -> CustomerServiceConfigOut:
     config, service_item, group, project = service.update_single(config_id=config_id, dto=payload)
     return mapper.to_customer_config_out(config=config, service=service_item, group=group, project=project)
+
+
+@router.delete(
+    "/customer-service-configs/{config_id}",
+    tags=[CUSTOMER_SERVICE_CONFIGS_TAG],
+    response_model=CustomerServiceConfigOut,
+    summary="Delete customer service config",
+    description="Delete a single customer service config row by id.",
+    responses={
+        200: {"description": "Customer service config deleted."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer service config not found."},
+        409: {"description": "Config is referenced by other records and cannot be deleted."},
+    },
+)
+def delete_customer_service_config(
+    config_id: int,
+    _: object = Depends(require_admin),
+    service: CustomerServiceConfigService = Depends(get_customer_service_config_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> CustomerServiceConfigOut:
+    config, service_item, group, project = service.delete_single(config_id=config_id)
+    return mapper.to_customer_config_out(config=config, service=service_item, group=group, project=project)
+
+
+@router.get(
+    "/customers/{customer_id}/service-purchases",
+    tags=[CUSTOMER_SERVICE_PURCHASES_TAG],
+    response_model=CustomerServicePurchaseListOut,
+    summary="List customer service purchases",
+    description="Return stored service purchases for a customer. Accessible by admin users and the owning customer user.",
+    responses={
+        200: {"description": "Customer service purchases returned."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        404: {"description": "Customer not found."},
+    },
+)
+def list_customer_service_purchases(
+    response: Response,
+    customer_id: int,
+    is_active: bool | None = Query(default=None, description="Filter by active flag."),
+    search: str | None = Query(default=None, description="Search by purchase notes."),
+    sort_by: Literal[
+        "id",
+        "selected_count",
+        "sale_total",
+        "support_total",
+        "grand_total",
+        "is_active",
+        "created_at",
+        "updated_at",
+    ] = Query(default="created_at", description="Sort field."),
+    sort_order: SortOrder = Query(default=SortOrder.DESC, description="Sort direction."),
+    pagination: PaginationParams = Depends(get_pagination_params),
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerServicePurchaseService = Depends(get_customer_service_purchase_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> CustomerServicePurchaseListOut:
+    purchases, meta = service.list_by_customer(
+        customer_id=customer_id,
+        is_active=is_active,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        pagination=pagination,
+        current_user=current_user,
+    )
+    set_pagination_headers(response=response, meta=meta)
+    return CustomerServicePurchaseListOut(
+        items=[
+            mapper.to_customer_service_purchase_out(
+                purchase=item.purchase,
+                items=item.items,
+            )
+            for item in purchases
+        ],
+        total_page=meta.total_pages,
+    )
+
+
+@router.post(
+    "/customers/{customer_id}/service-purchases",
+    tags=[CUSTOMER_SERVICE_PURCHASES_TAG],
+    response_model=CustomerServicePurchaseOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create customer service purchase",
+    description="Create a stored purchase from selected customer service configs. Accessible by admin users and the owning customer user.",
+    responses={
+        201: {"description": "Customer service purchase created."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        404: {"description": "Customer not found."},
+        422: {"description": "Payload validation failed."},
+    },
+)
+def create_customer_service_purchase(
+    customer_id: int,
+    payload: CustomerServicePurchaseCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerServicePurchaseService = Depends(get_customer_service_purchase_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> CustomerServicePurchaseOut:
+    purchase = service.create(
+        customer_id=customer_id,
+        dto=payload,
+        current_user=current_user,
+    )
+    return mapper.to_customer_service_purchase_out(
+        purchase=purchase.purchase,
+        items=purchase.items,
+    )
+
+
+@router.get(
+    "/customer-service-purchases/{purchase_id}",
+    tags=[CUSTOMER_SERVICE_PURCHASES_TAG],
+    response_model=CustomerServicePurchaseOut,
+    summary="Get customer service purchase",
+    description="Return a stored customer service purchase by id. Accessible by admin users and the owning customer user.",
+    responses={
+        200: {"description": "Customer service purchase returned."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        404: {"description": "Customer service purchase not found."},
+    },
+)
+def get_customer_service_purchase(
+    purchase_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerServicePurchaseService = Depends(get_customer_service_purchase_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> CustomerServicePurchaseOut:
+    purchase = service.get_by_id(
+        purchase_id=purchase_id,
+        current_user=current_user,
+    )
+    return mapper.to_customer_service_purchase_out(
+        purchase=purchase.purchase,
+        items=purchase.items,
+    )
+
+
+@router.patch(
+    "/customer-service-purchases/{purchase_id}",
+    tags=[CUSTOMER_SERVICE_PURCHASES_TAG],
+    response_model=CustomerServicePurchaseOut,
+    summary="Update customer service purchase",
+    description="Update purchase notes or replace the selected customer service configs. Accessible by admin users and the owning customer user.",
+    responses={
+        200: {"description": "Customer service purchase updated."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        404: {"description": "Customer service purchase not found."},
+        422: {"description": "Payload validation failed."},
+    },
+)
+def update_customer_service_purchase(
+    purchase_id: int,
+    payload: CustomerServicePurchaseUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerServicePurchaseService = Depends(get_customer_service_purchase_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> CustomerServicePurchaseOut:
+    purchase = service.update(
+        purchase_id=purchase_id,
+        dto=payload,
+        current_user=current_user,
+    )
+    return mapper.to_customer_service_purchase_out(
+        purchase=purchase.purchase,
+        items=purchase.items,
+    )
+
+
+@router.delete(
+    "/customer-service-purchases/{purchase_id}",
+    tags=[CUSTOMER_SERVICE_PURCHASES_TAG],
+    response_model=CustomerServicePurchaseOut,
+    summary="Deactivate customer service purchase",
+    description="Soft delete a stored customer service purchase by setting is_active=false. Accessible by admin users and the owning customer user.",
+    responses={
+        200: {"description": "Customer service purchase deactivated."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        404: {"description": "Customer service purchase not found."},
+    },
+)
+def deactivate_customer_service_purchase(
+    purchase_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerServicePurchaseService = Depends(get_customer_service_purchase_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> CustomerServicePurchaseOut:
+    purchase = service.deactivate(
+        purchase_id=purchase_id,
+        current_user=current_user,
+    )
+    return mapper.to_customer_service_purchase_out(
+        purchase=purchase.purchase,
+        items=purchase.items,
+    )
 
 
 @router.get(

@@ -197,6 +197,93 @@ class CustomerServiceConfigBulkUpsertCreate(CustomerServiceConfigBulkUpsertBase)
     pass
 
 
+class CustomerServicePurchaseItemBase(MongoDTO):
+    customer_service_config_id: int = Field(
+        ...,
+        description="Customer service config id.",
+        examples=[1],
+    )
+
+
+class CustomerServicePurchaseItemCreate(CustomerServicePurchaseItemBase):
+    pass
+
+
+class CustomerServicePurchaseItemOut(WithId, CustomerServicePurchaseItemBase):
+    service_id: int = Field(..., description="Service id.", examples=[1])
+    project_id: int = Field(..., description="Service project id.", examples=[1])
+    project_name: str = Field(..., description="Service project name.", examples=["Digital Transformation"])
+    group_id: int = Field(..., description="Service group id.", examples=[1])
+    group_name: str = Field(..., description="Service group name.", examples=["Security"])
+    service_name: str = Field(..., description="Service name.", examples=["Camera Monitoring"])
+    sale_price: int | None = Field(default=None, description="Selected sale price.", examples=[5000000])
+    support_price: int = Field(..., description="Selected support price.", examples=[1500000])
+    line_sale_total: int = Field(..., description="Line sale total.", examples=[5000000])
+    line_support_total: int = Field(..., description="Line support total.", examples=[1500000])
+    line_grand_total: int = Field(..., description="Line grand total.", examples=[6500000])
+    created_at: datetime = Field(..., description="Creation timestamp.")
+    updated_at: datetime = Field(..., description="Last update timestamp.")
+
+
+class CustomerServicePurchaseBase(MongoDTO):
+    notes: str | None = Field(
+        default=None,
+        description="Optional purchase notes.",
+        examples=["User selected the essential services only."],
+    )
+
+
+class CustomerServicePurchaseCreate(CustomerServicePurchaseBase):
+    items: list[CustomerServicePurchaseItemCreate] = Field(
+        ...,
+        description="Selected customer service configs for this purchase.",
+    )
+
+    @model_validator(mode="after")
+    def validate_non_empty_items(self) -> "CustomerServicePurchaseCreate":
+        if len(self.items) == 0:
+            raise ValueError(ITEMS_MUST_NOT_BE_EMPTY)
+        return self
+
+
+class CustomerServicePurchaseOut(WithId, CustomerServicePurchaseBase):
+    customer_id: int = Field(..., description="Customer id.", examples=[1])
+    created_by_user_id: int = Field(..., description="Creator user id.", examples=[7])
+    selected_count: int = Field(..., description="Count of selected services.", examples=[5])
+    sale_total: int = Field(..., description="Total sale amount.", examples=[12000000])
+    support_total: int = Field(..., description="Total support amount.", examples=[3000000])
+    grand_total: int = Field(..., description="Total payable amount.", examples=[15000000])
+    is_active: bool = Field(..., description="Purchase active status.", examples=[True])
+    items: list[CustomerServicePurchaseItemOut] = Field(
+        ...,
+        description="Selected service items captured for this purchase.",
+    )
+    created_at: datetime = Field(..., description="Creation timestamp.")
+    updated_at: datetime = Field(..., description="Last update timestamp.")
+
+
+class CustomerServicePurchaseListOut(PaginatedResponse[CustomerServicePurchaseOut]):
+    pass
+
+
+class CustomerServicePurchaseUpdate(CustomerServicePurchaseBase):
+    notes: str | None = Field(
+        default=None,
+        description="Optional purchase notes.",
+        examples=["Updated after final review."],
+    )
+    items: list[CustomerServicePurchaseItemCreate] | None = Field(
+        default=None,
+        description="Replacement list of selected customer service configs.",
+    )
+
+    @model_validator(mode="after")
+    def validate_items_when_present(self) -> "CustomerServicePurchaseUpdate":
+        if self.items is not None and len(self.items) == 0:
+            raise ValueError(ITEMS_MUST_NOT_BE_EMPTY)
+        return self
+
+
 class CustomerPricingSummaryCustomer(MongoDTO):
     id: int = Field(..., description="Customer id.", examples=[1])
     name: str = Field(..., description="Customer name.", examples=["Tehran Customer"])

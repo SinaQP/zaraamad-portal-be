@@ -2,7 +2,7 @@
 
 Backend API for Zaraamad Portal Phase 1.
 
-Current release: `0.7.0`
+Current release: `0.8.0`
 
 ## Overview
 
@@ -14,6 +14,7 @@ This backend currently provides:
 - User management
 - Service project, group, and catalog management
 - Customer-specific service pricing and pricing summary
+- Customer service purchase selection with stored totals
 - Subscription lifecycle and subscription message management
 - Standardized API error responses
 - Search, sorting, pagination, and soft deactivation
@@ -266,7 +267,16 @@ Customer service configuration:
 - `GET /customers/{customer_id}/services`
 - `PUT /customers/{customer_id}/services`
 - `PATCH /customer-service-configs/{config_id}`
+- `DELETE /customer-service-configs/{config_id}`
 - `GET /customers/{customer_id}/pricing-summary`
+
+Customer service purchases:
+
+- `GET /customers/{customer_id}/service-purchases`
+- `POST /customers/{customer_id}/service-purchases`
+- `GET /customer-service-purchases/{purchase_id}`
+- `PATCH /customer-service-purchases/{purchase_id}`
+- `DELETE /customer-service-purchases/{purchase_id}`
 
 Subscriptions:
 
@@ -307,6 +317,10 @@ Pagination metadata is returned in response headers:
 - bulk upsert on `PUT /customers/{customer_id}/services` works by `service_id`
 - omitted items in a bulk upsert remain unchanged
 - service, group, customer-config, and pricing-summary responses include project information
+- customer users can list service configs for their own customer
+- customer service purchases store the selected `customer_service_config_id` rows as purchase snapshots
+- purchase totals are persisted from the selected config prices at the time of create/update
+- disabled or inactive customer service configs cannot be selected in a purchase
 
 Service catalog hierarchy:
 

@@ -35,6 +35,7 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.TOO_MANY_OTP_REQUESTS: "OTP request rate limit exceeded.",
     messages.DATA_INTEGRITY_ERROR: "A database integrity constraint was violated.",
     messages.CUSTOMER_NOT_FOUND: "Requested customer record was not found.",
+    messages.CUSTOMER_ACCESS_DENIED: "Authenticated user cannot access the requested customer scope.",
     messages.SERVICE_PROJECT_NOT_FOUND: "Requested service project record was not found.",
     messages.SERVICE_GROUP_NOT_FOUND: "Requested service group record was not found.",
     messages.SERVICE_NOT_FOUND: "Requested service record was not found.",
@@ -50,6 +51,19 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     ),
     messages.INACTIVE_SERVICE_CANNOT_BE_ASSIGNED: "An inactive service was passed for a new customer config.",
     messages.CUSTOMER_SERVICE_CONFIG_NOT_FOUND: "Requested customer service config record was not found.",
+    messages.CUSTOMER_SERVICE_CONFIG_IN_USE: (
+        "The customer service config cannot be deleted because purchase history references it."
+    ),
+    messages.CUSTOMER_SERVICE_PURCHASE_NOT_FOUND: "Requested customer service purchase record was not found.",
+    messages.CUSTOMER_SERVICE_CONFIG_SELECTION_INVALID: (
+        "At least one selected customer_service_config_id was invalid for this customer."
+    ),
+    messages.CUSTOMER_SERVICE_CONFIG_NOT_PURCHASABLE: (
+        "At least one selected customer service config is disabled or references inactive catalog data."
+    ),
+    messages.DUPLICATE_CUSTOMER_SERVICE_PURCHASE_SELECTION: (
+        "The payload contains duplicate customer_service_config_id values."
+    ),
     messages.CUSTOMER_ID_REQUIRED: "Customer users must include customer_id.",
     messages.CUSTOMER_ID_INVALID_OR_INACTIVE: "The supplied customer_id is invalid or inactive.",
     messages.ACTIVE_SUBSCRIPTION_NOT_FOUND: "No active subscription record exists.",

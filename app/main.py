@@ -53,6 +53,10 @@ OPENAPI_TAGS = [
         "description": "Customer-specific service enablement and pricing endpoints.",
     },
     {
+        "name": "customer-service-purchases",
+        "description": "Customer-selected service purchase CRUD endpoints with stored totals.",
+    },
+    {
         "name": "customer-pricing",
         "description": "Customer pricing summary endpoints.",
     },

@@ -3,16 +3,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, status
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.common.database import Base, get_db_session
-from app.common.enums import SortOrder
+from app.common.dtos import CurrentUser
+from app.common.enums import SortOrder, UserRole
 from app.common.messages import (
+    CUSTOMER_ACCESS_DENIED,
     CUSTOMER_NOT_FOUND,
+    CUSTOMER_SERVICE_CONFIG_IN_USE,
     CUSTOMER_SERVICE_CONFIG_NOT_FOUND,
+    CUSTOMER_SERVICE_CONFIG_NOT_PURCHASABLE,
+    CUSTOMER_SERVICE_CONFIG_SELECTION_INVALID,
+    CUSTOMER_SERVICE_PURCHASE_NOT_FOUND,
     DATA_INTEGRITY_ERROR,
+    DUPLICATE_CUSTOMER_SERVICE_PURCHASE_SELECTION,
     DUPLICATE_CUSTOMER_SERVICE_CONFIGURATION,
     DUPLICATE_SERVICE_ID_IN_PAYLOAD,
     GROUP_ID_CANNOT_BE_NULL,
@@ -37,6 +44,9 @@ from app.modules.service_catalog.dtos import (
     CustomerServiceConfigBulkUpsertCreate,
     CustomerServiceConfigCreate,
     CustomerServiceConfigUpdate,
+    CustomerServicePurchaseCreate,
+    CustomerServicePurchaseItemCreate,
+    CustomerServicePurchaseUpdate,
     ServiceCreate,
     ServiceGroupCreate,
     ServiceGroupUpdate,
@@ -44,7 +54,14 @@ from app.modules.service_catalog.dtos import (
     ServiceProjectUpdate,
     ServiceUpdate,
 )
-from app.modules.service_catalog.schemas import CustomerServiceConfig, Service, ServiceGroup, ServiceProject
+from app.modules.service_catalog.schemas import (
+    CustomerServiceConfig,
+    CustomerServicePurchase,
+    CustomerServicePurchaseItem,
+    Service,
+    ServiceGroup,
+    ServiceProject,
+)
 
 
 @dataclass
@@ -488,6 +505,7 @@ class CustomerServiceConfigService:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
         self._customer_lookup_service = CustomerLookupService(db_session=db_session)
+        self._access_policy = CustomerScopedAccessPolicy()
         self._policy = CustomerServiceConfigPolicy(db_session=db_session)
         self._query_builder = CustomerServiceConfigQueryBuilder()
 
@@ -500,8 +518,13 @@ class CustomerServiceConfigService:
         sort_by: str,
         sort_order: SortOrder,
         pagination: PaginationParams,
+        current_user: CurrentUser,
     ) -> tuple[list[tuple[CustomerServiceConfig, Service, ServiceGroup, ServiceProject]], PaginationMeta]:
         self._customer_lookup_service.get_active_or_404(customer_id=customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=customer_id,
+        )
         query = self._query_builder.build_list_query(
             customer_id=customer_id,
             project_id=project_id,
@@ -599,6 +622,22 @@ class CustomerServiceConfigService:
             )
         return row[0], row[1], row[2], row[3]
 
+    def delete_single(
+        self,
+        config_id: int,
+    ) -> tuple[CustomerServiceConfig, Service, ServiceGroup, ServiceProject]:
+        config, service, group, project = self._get_joined_config_or_404(config_id=config_id)
+        self._db_session.delete(config)
+        try:
+            self._db_session.commit()
+        except IntegrityError as exc:
+            self._db_session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=CUSTOMER_SERVICE_CONFIG_IN_USE,
+            ) from exc
+        return config, service, group, project
+
     def _list_joined_configs(
         self,
         customer_id: int,
@@ -615,6 +654,25 @@ class CustomerServiceConfigService:
         ).all()
         return [(row[0], row[1], row[2], row[3]) for row in rows]
 
+    def _get_joined_config_or_404(
+        self,
+        *,
+        config_id: int,
+    ) -> tuple[CustomerServiceConfig, Service, ServiceGroup, ServiceProject]:
+        row = self._db_session.execute(
+            select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
+            .join(Service, Service.id == CustomerServiceConfig.service_id)
+            .join(ServiceGroup, ServiceGroup.id == Service.group_id)
+            .join(ServiceProject, ServiceProject.id == Service.project_id)
+            .where(CustomerServiceConfig.id == config_id)
+        ).first()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=CUSTOMER_SERVICE_CONFIG_NOT_FOUND,
+            )
+        return row[0], row[1], row[2], row[3]
+
     def _commit_with_integrity_guard(self) -> None:
         try:
             self._db_session.commit()
@@ -625,6 +683,460 @@ class CustomerServiceConfigService:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=DUPLICATE_CUSTOMER_SERVICE_CONFIGURATION,
+                ) from exc
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=DATA_INTEGRITY_ERROR,
+            ) from exc
+
+
+@dataclass(frozen=True)
+class CustomerServicePurchaseDetails:
+    purchase: CustomerServicePurchase
+    items: list[CustomerServicePurchaseItem]
+
+
+@dataclass(frozen=True)
+class CustomerServicePurchaseTotals:
+    sale_total: int
+    support_total: int
+    grand_total: int
+
+
+@dataclass(frozen=True)
+class ResolvedCustomerServicePurchaseSelection:
+    config: CustomerServiceConfig
+    service: Service
+    group: ServiceGroup
+    project: ServiceProject
+
+
+class CustomerScopedAccessPolicy:
+    def validate_customer_access(
+        self,
+        *,
+        current_user: CurrentUser,
+        customer_id: int,
+    ) -> None:
+        if current_user.role == UserRole.ADMIN:
+            return
+        has_customer_access = (
+            current_user.role == UserRole.CUSTOMER
+            and current_user.customer_id == customer_id
+        )
+        if has_customer_access:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": CUSTOMER_ACCESS_DENIED,
+                "developer_message": (
+                    f"User {current_user.id} with role {current_user.role.value} "
+                    f"cannot access customer {customer_id}."
+                ),
+            },
+        )
+
+
+class CustomerServicePurchaseQueryBuilder:
+    SORT_COLUMNS = {
+        "id": CustomerServicePurchase.id,
+        "selected_count": CustomerServicePurchase.selected_count,
+        "sale_total": CustomerServicePurchase.sale_total,
+        "support_total": CustomerServicePurchase.support_total,
+        "grand_total": CustomerServicePurchase.grand_total,
+        "is_active": CustomerServicePurchase.is_active,
+        "created_at": CustomerServicePurchase.created_at,
+        "updated_at": CustomerServicePurchase.updated_at,
+    }
+
+    def build_list_query(
+        self,
+        *,
+        customer_id: int,
+        is_active: bool | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+    ) -> Select[tuple[CustomerServicePurchase]]:
+        query = select(CustomerServicePurchase).where(
+            CustomerServicePurchase.customer_id == customer_id
+        )
+        if is_active is None:
+            query = query.where(CustomerServicePurchase.is_active.is_(True))
+        else:
+            query = query.where(CustomerServicePurchase.is_active.is_(is_active))
+        if search:
+            query = query.where(CustomerServicePurchase.notes.ilike(f"%{search}%"))
+        sort_column = self.SORT_COLUMNS[sort_by]
+        if sort_order == SortOrder.DESC:
+            query = query.order_by(
+                sort_column.desc(),
+                CustomerServicePurchase.id.desc(),
+            )
+        else:
+            query = query.order_by(
+                sort_column.asc(),
+                CustomerServicePurchase.id.asc(),
+            )
+        return query
+
+
+class CustomerServicePurchaseSelectionPolicy:
+    def __init__(self, db_session: Session) -> None:
+        self._db_session = db_session
+
+    def validate_payload(
+        self,
+        items: list[CustomerServicePurchaseItemCreate],
+    ) -> None:
+        config_ids = [item.customer_service_config_id for item in items]
+        if len(config_ids) != len(set(config_ids)):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=DUPLICATE_CUSTOMER_SERVICE_PURCHASE_SELECTION,
+            )
+
+    def resolve_items(
+        self,
+        *,
+        customer_id: int,
+        items: list[CustomerServicePurchaseItemCreate],
+    ) -> list[ResolvedCustomerServicePurchaseSelection]:
+        self.validate_payload(items=items)
+        config_ids = [item.customer_service_config_id for item in items]
+        rows = self._db_session.execute(
+            select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
+            .join(Service, Service.id == CustomerServiceConfig.service_id)
+            .join(ServiceGroup, ServiceGroup.id == Service.group_id)
+            .join(ServiceProject, ServiceProject.id == Service.project_id)
+            .where(
+                CustomerServiceConfig.customer_id == customer_id,
+                CustomerServiceConfig.id.in_(config_ids),
+            )
+        ).all()
+        selection_map = {
+            row[0].id: ResolvedCustomerServicePurchaseSelection(
+                config=row[0],
+                service=row[1],
+                group=row[2],
+                project=row[3],
+            )
+            for row in rows
+        }
+        selections: list[ResolvedCustomerServicePurchaseSelection] = []
+        for item in items:
+            selection = selection_map.get(item.customer_service_config_id)
+            if selection is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=CUSTOMER_SERVICE_CONFIG_SELECTION_INVALID,
+                )
+            is_purchasable = (
+                selection.config.is_enabled
+                and selection.service.is_active
+                and selection.group.is_active
+                and selection.project.is_active
+            )
+            if not is_purchasable:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=CUSTOMER_SERVICE_CONFIG_NOT_PURCHASABLE,
+                )
+            selections.append(selection)
+        return selections
+
+
+class CustomerServicePurchaseService:
+    def __init__(self, db_session: Session) -> None:
+        self._db_session = db_session
+        self._customer_lookup_service = CustomerLookupService(db_session=db_session)
+        self._access_policy = CustomerScopedAccessPolicy()
+        self._query_builder = CustomerServicePurchaseQueryBuilder()
+        self._selection_policy = CustomerServicePurchaseSelectionPolicy(
+            db_session=db_session,
+        )
+
+    def list_by_customer(
+        self,
+        *,
+        customer_id: int,
+        is_active: bool | None,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+        pagination: PaginationParams,
+        current_user: CurrentUser,
+    ) -> tuple[list[CustomerServicePurchaseDetails], PaginationMeta]:
+        self._customer_lookup_service.get_active_or_404(customer_id=customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=customer_id,
+        )
+        query = self._query_builder.build_list_query(
+            customer_id=customer_id,
+            is_active=is_active,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total_count = int(
+            self._db_session.scalar(
+                select(func.count()).select_from(query.order_by(None).subquery())
+            ) or 0
+        )
+        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
+        purchases = list(self._db_session.scalars(paginated_query).all())
+        items_by_purchase_id = self._get_items_by_purchase_ids(
+            purchase_ids=[purchase.id for purchase in purchases]
+        )
+        details = [
+            CustomerServicePurchaseDetails(
+                purchase=purchase,
+                items=items_by_purchase_id.get(purchase.id, []),
+            )
+            for purchase in purchases
+        ]
+        meta = PaginationMeta(
+            total_count=total_count,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
+        return details, meta
+
+    def create(
+        self,
+        *,
+        customer_id: int,
+        dto: CustomerServicePurchaseCreate,
+        current_user: CurrentUser,
+    ) -> CustomerServicePurchaseDetails:
+        self._customer_lookup_service.get_active_or_404(customer_id=customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=customer_id,
+        )
+        purchase = CustomerServicePurchase(
+            customer_id=customer_id,
+            created_by_user_id=current_user.id,
+            notes=dto.notes,
+            sale_total=0,
+            support_total=0,
+            grand_total=0,
+            selected_count=0,
+            is_active=True,
+        )
+        self._db_session.add(purchase)
+        self._db_session.flush()
+        self._replace_purchase_items(
+            purchase=purchase,
+            item_payloads=dto.items,
+        )
+        self._commit_with_integrity_guard()
+        self._db_session.refresh(purchase)
+        return self.get_by_id(
+            purchase_id=purchase.id,
+            current_user=current_user,
+            include_inactive=True,
+        )
+
+    def get_by_id(
+        self,
+        *,
+        purchase_id: int,
+        current_user: CurrentUser,
+        include_inactive: bool = False,
+    ) -> CustomerServicePurchaseDetails:
+        purchase = self._get_purchase_or_404(
+            purchase_id=purchase_id,
+            include_inactive=include_inactive,
+        )
+        self._customer_lookup_service.get_active_or_404(customer_id=purchase.customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=purchase.customer_id,
+        )
+        return CustomerServicePurchaseDetails(
+            purchase=purchase,
+            items=self._get_items_for_purchase(purchase_id=purchase.id),
+        )
+
+    def update(
+        self,
+        *,
+        purchase_id: int,
+        dto: CustomerServicePurchaseUpdate,
+        current_user: CurrentUser,
+    ) -> CustomerServicePurchaseDetails:
+        purchase = self._get_purchase_or_404(
+            purchase_id=purchase_id,
+            include_inactive=False,
+        )
+        self._customer_lookup_service.get_active_or_404(customer_id=purchase.customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=purchase.customer_id,
+        )
+        if "notes" in dto.model_fields_set:
+            purchase.notes = dto.notes
+        if "items" in dto.model_fields_set and dto.items is not None:
+            self._replace_purchase_items(
+                purchase=purchase,
+                item_payloads=dto.items,
+            )
+        self._commit_with_integrity_guard()
+        self._db_session.refresh(purchase)
+        return self.get_by_id(
+            purchase_id=purchase.id,
+            current_user=current_user,
+            include_inactive=True,
+        )
+
+    def deactivate(
+        self,
+        *,
+        purchase_id: int,
+        current_user: CurrentUser,
+    ) -> CustomerServicePurchaseDetails:
+        purchase = self._get_purchase_or_404(
+            purchase_id=purchase_id,
+            include_inactive=False,
+        )
+        self._customer_lookup_service.get_active_or_404(customer_id=purchase.customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=purchase.customer_id,
+        )
+        purchase.is_active = False
+        self._commit_with_integrity_guard()
+        self._db_session.refresh(purchase)
+        return self.get_by_id(
+            purchase_id=purchase.id,
+            current_user=current_user,
+            include_inactive=True,
+        )
+
+    def _get_purchase_or_404(
+        self,
+        *,
+        purchase_id: int,
+        include_inactive: bool,
+    ) -> CustomerServicePurchase:
+        purchase = self._db_session.get(CustomerServicePurchase, purchase_id)
+        if purchase is None or (not include_inactive and not purchase.is_active):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=CUSTOMER_SERVICE_PURCHASE_NOT_FOUND,
+            )
+        return purchase
+
+    def _replace_purchase_items(
+        self,
+        *,
+        purchase: CustomerServicePurchase,
+        item_payloads: list[CustomerServicePurchaseItemCreate],
+    ) -> None:
+        selections = self._selection_policy.resolve_items(
+            customer_id=purchase.customer_id,
+            items=item_payloads,
+        )
+        totals = self._calculate_totals(selections=selections)
+        purchase.selected_count = len(selections)
+        purchase.sale_total = totals.sale_total
+        purchase.support_total = totals.support_total
+        purchase.grand_total = totals.grand_total
+        self._db_session.execute(
+            delete(CustomerServicePurchaseItem).where(
+                CustomerServicePurchaseItem.customer_service_purchase_id == purchase.id
+            )
+        )
+        for selection in selections:
+            self._db_session.add(
+                CustomerServicePurchaseItem(
+                    customer_service_purchase_id=purchase.id,
+                    customer_service_config_id=selection.config.id,
+                    service_id=selection.service.id,
+                    project_id=selection.project.id,
+                    project_name=selection.project.name,
+                    group_id=selection.group.id,
+                    group_name=selection.group.name,
+                    service_name=selection.service.name,
+                    sale_price=selection.config.sale_price,
+                    support_price=selection.config.support_price,
+                )
+            )
+
+    def _calculate_totals(
+        self,
+        *,
+        selections: list[ResolvedCustomerServicePurchaseSelection],
+    ) -> CustomerServicePurchaseTotals:
+        sale_total = 0
+        support_total = 0
+        for selection in selections:
+            sale_total += selection.config.sale_price or 0
+            support_total += selection.config.support_price
+        return CustomerServicePurchaseTotals(
+            sale_total=sale_total,
+            support_total=support_total,
+            grand_total=sale_total + support_total,
+        )
+
+    def _get_items_by_purchase_ids(
+        self,
+        *,
+        purchase_ids: list[int],
+    ) -> dict[int, list[CustomerServicePurchaseItem]]:
+        if not purchase_ids:
+            return {}
+        items = list(
+            self._db_session.scalars(
+                select(CustomerServicePurchaseItem)
+                .where(
+                    CustomerServicePurchaseItem.customer_service_purchase_id.in_(
+                        purchase_ids
+                    )
+                )
+                .order_by(
+                    CustomerServicePurchaseItem.customer_service_purchase_id.asc(),
+                    CustomerServicePurchaseItem.id.asc(),
+                )
+            ).all()
+        )
+        items_by_purchase_id: dict[int, list[CustomerServicePurchaseItem]] = {}
+        for item in items:
+            items_by_purchase_id.setdefault(
+                item.customer_service_purchase_id,
+                [],
+            ).append(item)
+        return items_by_purchase_id
+
+    def _get_items_for_purchase(
+        self,
+        *,
+        purchase_id: int,
+    ) -> list[CustomerServicePurchaseItem]:
+        return list(
+            self._db_session.scalars(
+                select(CustomerServicePurchaseItem)
+                .where(CustomerServicePurchaseItem.customer_service_purchase_id == purchase_id)
+                .order_by(CustomerServicePurchaseItem.id.asc())
+            ).all()
+        )
+
+    def _commit_with_integrity_guard(self) -> None:
+        try:
+            self._db_session.commit()
+        except IntegrityError as exc:
+            self._db_session.rollback()
+            error_text = str(exc.orig).lower()
+            if (
+                "customer_service_purchase_items" in error_text
+                and "customer_service_config_id" in error_text
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=DUPLICATE_CUSTOMER_SERVICE_PURCHASE_SELECTION,
                 ) from exc
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -749,6 +1261,12 @@ def get_customer_service_config_service(
     db_session: Session = Depends(get_db_session),
 ) -> CustomerServiceConfigService:
     return CustomerServiceConfigService(db_session=db_session)
+
+
+def get_customer_service_purchase_service(
+    db_session: Session = Depends(get_db_session),
+) -> CustomerServicePurchaseService:
+    return CustomerServicePurchaseService(db_session=db_session)
 
 
 def get_customer_pricing_summary_service(

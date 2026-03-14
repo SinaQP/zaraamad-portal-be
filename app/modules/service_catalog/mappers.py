@@ -1,5 +1,7 @@
 from app.modules.service_catalog.dtos import (
     CustomerServiceConfigOut,
+    CustomerServicePurchaseItemOut,
+    CustomerServicePurchaseOut,
     ServiceGroupInfo,
     ServiceGroupOut,
     ServiceOut,
@@ -9,7 +11,14 @@ from app.modules.service_catalog.dtos import (
     ServiceProjectInfo,
     ServiceProjectOut,
 )
-from app.modules.service_catalog.schemas import CustomerServiceConfig, Service, ServiceGroup, ServiceProject
+from app.modules.service_catalog.schemas import (
+    CustomerServiceConfig,
+    CustomerServicePurchase,
+    CustomerServicePurchaseItem,
+    Service,
+    ServiceGroup,
+    ServiceProject,
+)
 
 
 class ServiceCatalogMapper:
@@ -126,6 +135,54 @@ class ServiceCatalogMapper:
             notes=config.notes,
             created_at=config.created_at,
             updated_at=config.updated_at,
+        )
+
+    def to_customer_service_purchase_item_out(
+        self,
+        item: CustomerServicePurchaseItem,
+    ) -> CustomerServicePurchaseItemOut:
+        sale_price = item.sale_price
+        line_sale_total = sale_price or 0
+        line_support_total = item.support_price
+        return CustomerServicePurchaseItemOut(
+            id=item.id,
+            customer_service_config_id=item.customer_service_config_id,
+            service_id=item.service_id,
+            project_id=item.project_id,
+            project_name=item.project_name,
+            group_id=item.group_id,
+            group_name=item.group_name,
+            service_name=item.service_name,
+            sale_price=sale_price,
+            support_price=item.support_price,
+            line_sale_total=line_sale_total,
+            line_support_total=line_support_total,
+            line_grand_total=line_sale_total + line_support_total,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+
+    def to_customer_service_purchase_out(
+        self,
+        purchase: CustomerServicePurchase,
+        items: list[CustomerServicePurchaseItem],
+    ) -> CustomerServicePurchaseOut:
+        return CustomerServicePurchaseOut(
+            id=purchase.id,
+            customer_id=purchase.customer_id,
+            created_by_user_id=purchase.created_by_user_id,
+            notes=purchase.notes,
+            selected_count=purchase.selected_count,
+            sale_total=purchase.sale_total,
+            support_total=purchase.support_total,
+            grand_total=purchase.grand_total,
+            is_active=purchase.is_active,
+            items=[
+                self.to_customer_service_purchase_item_out(item=item)
+                for item in items
+            ],
+            created_at=purchase.created_at,
+            updated_at=purchase.updated_at,
         )
 
 

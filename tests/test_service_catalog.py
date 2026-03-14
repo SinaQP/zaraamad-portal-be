@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.common.enums import UserRole
 from app.common.messages import (
     ADMIN_ACCESS_REQUIRED,
+    CUSTOMER_SERVICE_CONFIG_IN_USE,
     DUPLICATE_SERVICE_ID_IN_PAYLOAD,
     MISSING_AUTH_TOKEN,
     SUPPORT_PRICE_CANNOT_BE_NULL,
@@ -1333,6 +1334,123 @@ def test_patch_single_customer_service_config(client: TestClient, db_session: Se
     assert patch_data["sale_price"] is None
     assert patch_data["support_price"] == 250
     assert patch_data["notes"] == "v2"
+
+
+def test_delete_single_customer_service_config(client: TestClient, db_session: Session) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="delete-config-group",
+        name="Delete Config Group",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="delete-config-service",
+        name="Delete Config Service",
+    )
+
+    create_response = client.put(
+        f"/customers/{customer.id}/services",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "service_id": service_id,
+                    "is_enabled": True,
+                    "sale_price": 1000,
+                    "support_price": 200,
+                    "notes": "delete me",
+                }
+            ]
+        },
+    )
+    assert create_response.status_code == 200
+    config_id = create_response.json()[0]["id"]
+
+    delete_response = client.delete(f"/customer-service-configs/{config_id}", headers=headers)
+    assert delete_response.status_code == 200
+    delete_data = delete_response.json()
+    assert delete_data["id"] == config_id
+    assert delete_data["service_id"] == service_id
+    assert delete_data["notes"] == "delete me"
+
+    list_response = client.get(f"/customers/{customer.id}/services", headers=headers)
+    assert list_response.status_code == 200
+    assert list_response.headers["X-Total-Count"] == "0"
+    assert list_response.json()["items"] == []
+
+    detail_response = client.patch(
+        f"/customer-service-configs/{config_id}",
+        headers=headers,
+        json={"notes": "should fail"},
+    )
+    assert detail_response.status_code == 404
+
+
+def test_delete_single_customer_service_config_rejects_configs_used_in_purchase(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = _admin_headers(client=client, db_session=db_session)
+    customer = _create_customer_entity(db_session=db_session)
+    group_id = _create_service_group(
+        client=client,
+        headers=headers,
+        code="delete-guard-group",
+        name="Delete Guard Group",
+    )
+    service_id = _create_service(
+        client=client,
+        headers=headers,
+        group_id=group_id,
+        code="delete-guard-service",
+        name="Delete Guard Service",
+    )
+
+    create_response = client.put(
+        f"/customers/{customer.id}/services",
+        headers=headers,
+        json={
+            "items": [
+                {
+                    "service_id": service_id,
+                    "is_enabled": True,
+                    "sale_price": 1500,
+                    "support_price": 250,
+                    "notes": "locked by purchase",
+                }
+            ]
+        },
+    )
+    assert create_response.status_code == 200
+    config_id = create_response.json()[0]["id"]
+
+    purchase_response = client.post(
+        f"/customers/{customer.id}/service-purchases",
+        headers=headers,
+        json={
+            "notes": "initial purchase",
+            "items": [
+                {
+                    "customer_service_config_id": config_id,
+                }
+            ],
+        },
+    )
+    assert purchase_response.status_code == 201
+
+    delete_response = client.delete(f"/customer-service-configs/{config_id}", headers=headers)
+    assert delete_response.status_code == 409
+    assert delete_response.json()["detail"] == CUSTOMER_SERVICE_CONFIG_IN_USE
+
+    list_response = client.get(f"/customers/{customer.id}/services", headers=headers)
+    assert list_response.status_code == 200
+    assert list_response.headers["X-Total-Count"] == "1"
+    assert list_response.json()["items"][0]["id"] == config_id
 
 
 def test_patch_single_customer_service_config_rejects_null_support_price(
