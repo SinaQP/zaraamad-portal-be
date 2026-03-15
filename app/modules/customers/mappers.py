@@ -4,6 +4,7 @@ from app.modules.customers.dtos import (
     CustomerBridgeCapabilityBase,
     CustomerBridgeConfigOut,
     CustomerBridgeHealthOut,
+    CustomerBridgeSubscriptionOut,
     CustomerOut,
 )
 from app.modules.customers.schemas import Customer, CustomerBridgeConfig
@@ -71,6 +72,24 @@ class CustomerMapper:
                 )
                 for item in bridge_capabilities.capabilities
             ],
+        )
+
+    def to_bridge_subscription_out(
+        self,
+        customer: Customer,
+        bridge_config: CustomerBridgeConfig | None,
+    ) -> CustomerBridgeSubscriptionOut:
+        return CustomerBridgeSubscriptionOut(
+            customer_id=customer.id,
+            customer_name=customer.name,
+            bridge_base_url=bridge_config.bridge_base_url if bridge_config and bridge_config.bridge_base_url else "",
+            start_date=bridge_config.cached_subscription_start_date if bridge_config and bridge_config.cached_subscription_start_date else "",
+            end_date=bridge_config.cached_subscription_end_date if bridge_config and bridge_config.cached_subscription_end_date else "",
+            grace_period_end_date=bridge_config.cached_subscription_grace_period_end_date if bridge_config else None,
+            is_active=bridge_config.cached_subscription_is_active if bridge_config and bridge_config.cached_subscription_is_active is not None else False,
+            status_message=bridge_config.cached_subscription_status_message if bridge_config and bridge_config.cached_subscription_status_message is not None else "",
+            last_subscription_synced_at=bridge_config.last_subscription_synced_at if bridge_config else None,
+            last_subscription_error=bridge_config.last_subscription_error if bridge_config else None,
         )
 
 

@@ -66,9 +66,6 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     ),
     messages.CUSTOMER_ID_REQUIRED: "Customer users must include customer_id.",
     messages.CUSTOMER_ID_INVALID_OR_INACTIVE: "The supplied customer_id is invalid or inactive.",
-    messages.ACTIVE_SUBSCRIPTION_NOT_FOUND: "No active subscription record exists.",
-    messages.ACTIVE_SUBSCRIPTION_END_DATE_REQUIRED: "Creating an active subscription requires an end_date value.",
-    messages.DUPLICATE_SUBSCRIPTION_MESSAGE_STATUS: "The payload contains duplicate subscription message statuses.",
     messages.ROUTE_NOT_FOUND: "Route not found.",
     messages.METHOD_NOT_ALLOWED: "HTTP method is not allowed for this route.",
 }

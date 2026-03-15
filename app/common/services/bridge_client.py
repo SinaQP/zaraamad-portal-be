@@ -36,6 +36,15 @@ class BridgeCapabilitiesResult:
     capabilities: list[BridgeCapability]
 
 
+@dataclass(frozen=True)
+class BridgeSubscriptionResult:
+    start_date: str
+    end_date: str
+    grace_period_end_date: str | None
+    is_active: bool
+    status_message: str
+
+
 class BridgeClientError(Exception):
     pass
 
@@ -65,6 +74,7 @@ class BridgeInvalidResponseError(BridgeClientError):
 class BridgeClient:
     _HEALTH_PATH = "/bridge/health"
     _CAPABILITIES_PATH = "/bridge/capabilities"
+    _ACTIVE_SUBSCRIPTION_PATH = "/sub/subscriptions/active/"
 
     def get_health(self, request: BridgeRequest) -> BridgeHealthResult:
         payload = self._request_json(request=request, path=self._HEALTH_PATH)
@@ -89,6 +99,34 @@ class BridgeClient:
             bridge_name=bridge_name,
             bridge_version=bridge_version,
             capabilities=capabilities,
+        )
+
+    def get_active_subscription(
+        self,
+        request: BridgeRequest,
+    ) -> BridgeSubscriptionResult:
+        payload = self._request_json(
+            request=request,
+            path=self._ACTIVE_SUBSCRIPTION_PATH,
+        )
+        start_date = self._read_required_str(payload=payload, field_name="start_date")
+        end_date = self._read_required_str(payload=payload, field_name="end_date")
+        grace_period_end_date = self._read_optional_str(
+            payload=payload,
+            field_name="grace_period_end_date",
+        )
+        is_active = self._read_required_bool(payload=payload, field_name="is_active")
+        status_message = payload.get("status_message", "")
+        if not isinstance(status_message, str):
+            raise BridgeInvalidResponseError(
+                "Field 'status_message' must be a string when provided."
+            )
+        return BridgeSubscriptionResult(
+            start_date=start_date,
+            end_date=end_date,
+            grace_period_end_date=grace_period_end_date,
+            is_active=is_active,
+            status_message=status_message,
         )
 
     def _request_json(self, request: BridgeRequest, path: str) -> dict[str, Any]:
@@ -161,6 +199,14 @@ class BridgeClient:
             )
         normalized_value = value.strip()
         return normalized_value or None
+
+    def _read_required_bool(self, payload: dict[str, Any], field_name: str) -> bool:
+        value = payload.get(field_name)
+        if not isinstance(value, bool):
+            raise BridgeInvalidResponseError(
+                f"Field '{field_name}' must be a boolean."
+            )
+        return value
 
     def _decode_response_body(self, raw_body: bytes | str) -> str:
         if isinstance(raw_body, bytes):

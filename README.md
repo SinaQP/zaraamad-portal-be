@@ -2,7 +2,7 @@
 
 Backend API for Zaraamad Portal Phase 1.
 
-Current release: `0.8.0`
+Current release: `0.9.0`
 
 ## Overview
 
@@ -15,7 +15,7 @@ This backend currently provides:
 - Service project, group, and catalog management
 - Customer-specific service pricing and pricing summary
 - Customer service purchase selection with stored totals
-- Subscription lifecycle and subscription message management
+- Customer bridge health, capability, and cached subscription lookup
 - Standardized API error responses
 - Search, sorting, pagination, and soft deactivation
 
@@ -62,7 +62,6 @@ app/
     auth/
     customers/
     service_catalog/
-    subscriptions/
     users/
   main.py
   version.py
@@ -230,6 +229,16 @@ Customers:
 - `PATCH /customers/{customer_id}`
 - `DELETE /customers/{customer_id}`
 
+Customer bridge:
+
+- `GET /customers/{customer_id}/bridge`
+- `POST /customers/{customer_id}/bridge/refresh-status`
+- `PATCH /customers/{customer_id}/bridge`
+- `GET /customers/{customer_id}/bridge/health`
+- `GET /customers/{customer_id}/bridge/capabilities`
+- `GET /customers/{customer_id}/bridge/subscriptions/active`
+- `POST /customers/{customer_id}/bridge/subscriptions/refresh`
+
 Users:
 
 - `POST /users`
@@ -277,14 +286,6 @@ Customer service purchases:
 - `GET /customer-service-purchases/{purchase_id}`
 - `PATCH /customer-service-purchases/{purchase_id}`
 - `DELETE /customer-service-purchases/{purchase_id}`
-
-Subscriptions:
-
-- `POST /sub/subscription/`
-- `GET /sub/subscriptions/active/`
-- `PATCH /sub/subscriptions/active/`
-- `GET /sub/subscriptions/messages/`
-- `PATCH /sub/subscriptions/messages/`
 
 ## List, Search, and Pagination
 

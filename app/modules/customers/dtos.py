@@ -161,3 +161,50 @@ class CustomerBridgeCapabilitiesOut(MongoDTO):
         ...,
         description="Supported bridge capabilities.",
     )
+
+
+class CustomerBridgeSubscriptionBase(MongoDTO):
+    start_date: str = Field(
+        ...,
+        description="Subscription start date as a Jalali datetime string.",
+        examples=["1405-01-01 00:00:00"],
+    )
+    end_date: str = Field(
+        ...,
+        description="Subscription end date as a Jalali datetime string.",
+        examples=["1405-02-01 00:00:00"],
+    )
+    grace_period_end_date: str | None = Field(
+        default=None,
+        description="Subscription grace-period end date as a Jalali datetime string.",
+        examples=["1405-02-10 00:00:00"],
+    )
+    is_active: bool = Field(
+        ...,
+        description="Whether the upstream subscription is active.",
+        examples=[True],
+    )
+    status_message: str = Field(
+        ...,
+        description="Rendered subscription status message returned by the main app.",
+        examples=[""],
+    )
+    last_subscription_synced_at: datetime | None = Field(
+        default=None,
+        description="Timestamp of the most recent successful or definitive subscription refresh.",
+    )
+    last_subscription_error: str | None = Field(
+        default=None,
+        description="Last cached subscription refresh error for this customer bridge.",
+        examples=["هیچ اشتراک فعالی وجود ندارد."],
+    )
+
+
+class CustomerBridgeSubscriptionOut(CustomerBridgeSubscriptionBase):
+    customer_id: int = Field(..., description="Customer id.", examples=[1])
+    customer_name: str = Field(..., description="Customer name.", examples=["Tehran Customer"])
+    bridge_base_url: str = Field(
+        ...,
+        description="Bridge base URL used for the subscription request.",
+        examples=["https://tehran.example.com"],
+    )

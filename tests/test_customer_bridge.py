@@ -1,3 +1,4 @@
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -5,6 +6,7 @@ from app.common.enums import UserRole
 from app.common.messages import (
     CUSTOMER_BRIDGE_AUTH_FAILED,
     CUSTOMER_BRIDGE_NOT_CONFIGURED,
+    CUSTOMER_BRIDGE_SUBSCRIPTION_NOT_CACHED,
     CUSTOMER_BRIDGE_UNAVAILABLE,
 )
 from app.common.services.bridge_client import (
@@ -13,7 +15,9 @@ from app.common.services.bridge_client import (
     BridgeConnectionError,
     BridgeHealthResult,
     BridgeRequest,
+    BridgeSubscriptionResult,
     BridgeUnauthorizedError,
+    BridgeUnexpectedStatusError,
     get_bridge_client,
 )
 from app.main import app
@@ -51,21 +55,63 @@ class RecordingBridgeClient:
             ],
         )
 
+    def get_active_subscription(self, request: BridgeRequest) -> BridgeSubscriptionResult:
+        self.requests.append(("subscription", request))
+        return BridgeSubscriptionResult(
+            start_date="1405-01-01 00:00:00",
+            end_date="1405-02-01 00:00:00",
+            grace_period_end_date="1405-02-10 00:00:00",
+            is_active=True,
+            status_message="",
+        )
+
 
 class UnavailableBridgeClient:
     def get_health(self, request: BridgeRequest) -> BridgeHealthResult:
+        del request
         raise BridgeConnectionError("timed out")
 
     def get_capabilities(self, request: BridgeRequest) -> BridgeCapabilitiesResult:
+        del request
+        raise BridgeConnectionError("timed out")
+
+    def get_active_subscription(self, request: BridgeRequest) -> BridgeSubscriptionResult:
+        del request
         raise BridgeConnectionError("timed out")
 
 
 class UnauthorizedBridgeClient:
     def get_health(self, request: BridgeRequest) -> BridgeHealthResult:
+        del request
         raise BridgeUnauthorizedError(status_code=401)
 
     def get_capabilities(self, request: BridgeRequest) -> BridgeCapabilitiesResult:
+        del request
         raise BridgeUnauthorizedError(status_code=401)
+
+    def get_active_subscription(self, request: BridgeRequest) -> BridgeSubscriptionResult:
+        del request
+        raise BridgeUnauthorizedError(status_code=401)
+
+
+class MissingSubscriptionBridgeClient:
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, BridgeRequest]] = []
+
+    def get_health(self, request: BridgeRequest) -> BridgeHealthResult:
+        del request
+        raise AssertionError("health should not be called in this test")
+
+    def get_capabilities(self, request: BridgeRequest) -> BridgeCapabilitiesResult:
+        del request
+        raise AssertionError("capabilities should not be called in this test")
+
+    def get_active_subscription(self, request: BridgeRequest) -> BridgeSubscriptionResult:
+        self.requests.append(("subscription", request))
+        raise BridgeUnexpectedStatusError(
+            status_code=404,
+            response_body='{"error":"هیچ اشتراک فعالی وجود ندارد."}',
+        )
 
 
 def _create_admin(db_session: Session) -> User:
@@ -224,6 +270,82 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
     ]
 
 
+def test_customer_bridge_subscription_uses_customer_configuration(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    bridge_client = RecordingBridgeClient()
+    app.dependency_overrides[get_bridge_client] = lambda: bridge_client
+    headers = _admin_headers(client=client, db_session=db_session)
+
+    customer_response = client.post(
+        "/customers",
+        headers=headers,
+        json={
+            "name": "Subscription Customer",
+            "grade": 1,
+        },
+    )
+    assert customer_response.status_code == 201
+    customer_id = customer_response.json()["id"]
+
+    bridge_update_response = client.patch(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+        json={
+            "bridge_base_url": "https://subscription.example.com/",
+            "bridge_api_key": "bridge-secret",
+            "bridge_is_enabled": True,
+        },
+    )
+    assert bridge_update_response.status_code == 200
+
+    uncached_response = client.get(
+        f"/customers/{customer_id}/bridge/subscriptions/active",
+        headers=headers,
+    )
+    assert uncached_response.status_code == 404
+    assert uncached_response.json()["message"] == CUSTOMER_BRIDGE_SUBSCRIPTION_NOT_CACHED
+    assert bridge_client.requests == []
+
+    refresh_response = client.post(
+        f"/customers/{customer_id}/bridge/subscriptions/refresh",
+        headers={**headers, "X-Correlation-ID": "corr-subscription"},
+    )
+    assert refresh_response.status_code == 200
+    refresh_data = refresh_response.json()
+    assert refresh_data == {
+        "customer_id": customer_id,
+        "customer_name": "Subscription Customer",
+        "bridge_base_url": "https://subscription.example.com",
+        "start_date": "1405-01-01 00:00:00",
+        "end_date": "1405-02-01 00:00:00",
+        "grace_period_end_date": "1405-02-10 00:00:00",
+        "is_active": True,
+        "status_message": "",
+        "last_subscription_synced_at": refresh_data["last_subscription_synced_at"],
+        "last_subscription_error": None,
+    }
+    assert refresh_data["last_subscription_synced_at"] is not None
+
+    cached_response = client.get(
+        f"/customers/{customer_id}/bridge/subscriptions/active",
+        headers=headers,
+    )
+    assert cached_response.status_code == 200
+    assert cached_response.json() == refresh_data
+
+    assert bridge_client.requests == [(
+        "subscription",
+        BridgeRequest(
+            base_url="https://subscription.example.com",
+            api_key="bridge-secret",
+            timeout_seconds=10,
+            correlation_id="corr-subscription",
+        ),
+    )]
+
+
 def test_customer_bridge_health_rejects_incomplete_bridge_configuration(
     client: TestClient,
     db_session: Session,
@@ -247,6 +369,62 @@ def test_customer_bridge_health_rejects_incomplete_bridge_configuration(
     assert response.status_code == 409
     assert response.json()["message"] == CUSTOMER_BRIDGE_NOT_CONFIGURED
     assert "bridge_is_enabled" in response.json()["developer_message"]
+
+
+def test_customer_bridge_subscription_maps_missing_upstream_subscription_to_not_found(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    bridge_client = MissingSubscriptionBridgeClient()
+    app.dependency_overrides[get_bridge_client] = lambda: bridge_client
+    headers = _admin_headers(client=client, db_session=db_session)
+
+    customer_response = client.post(
+        "/customers",
+        headers=headers,
+        json={
+            "name": "No Subscription Customer",
+            "grade": 2,
+        },
+    )
+    assert customer_response.status_code == 201
+    customer_id = customer_response.json()["id"]
+
+    bridge_update_response = client.patch(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+        json={
+            "bridge_base_url": "https://subscription.example.com/",
+            "bridge_api_key": "bridge-secret",
+            "bridge_is_enabled": True,
+        },
+    )
+    assert bridge_update_response.status_code == 200
+
+    refresh_response = client.post(
+        f"/customers/{customer_id}/bridge/subscriptions/refresh",
+        headers=headers,
+    )
+    assert refresh_response.status_code == 404
+    response = refresh_response
+    assert response.json()["message"] == "هیچ اشتراک فعالی وجود ندارد."
+    assert "returned status 404" in response.json()["developer_message"]
+
+    cached_response = client.get(
+        f"/customers/{customer_id}/bridge/subscriptions/active",
+        headers=headers,
+    )
+    assert cached_response.status_code == 404
+    assert cached_response.json()["message"] == "هیچ اشتراک فعالی وجود ندارد."
+    assert bridge_client.requests == [(
+        "subscription",
+        BridgeRequest(
+            base_url="https://subscription.example.com",
+            api_key="bridge-secret",
+            timeout_seconds=10,
+            correlation_id=None,
+        ),
+    )]
 
 
 def test_customer_bridge_refresh_status_caches_offline_result_without_failing(
@@ -378,3 +556,15 @@ def test_customer_bridge_capabilities_maps_unauthorized_bridge_to_bad_gateway(
     assert response.status_code == 502
     assert response.json()["message"] == CUSTOMER_BRIDGE_AUTH_FAILED
     assert response.json()["detail"] == CUSTOMER_BRIDGE_AUTH_FAILED
+
+
+def test_local_subscription_routes_are_not_exposed() -> None:
+    route_paths = {
+        route.path
+        for route in app.routes
+        if isinstance(route, APIRoute)
+    }
+
+    assert "/sub/subscription/" not in route_paths
+    assert "/sub/subscriptions/active/" not in route_paths
+    assert "/sub/subscriptions/messages/" not in route_paths

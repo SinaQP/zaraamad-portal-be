@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -16,6 +17,7 @@ from app.common.messages import (
     CUSTOMER_BRIDGE_INVALID_RESPONSE,
     CUSTOMER_BRIDGE_NOT_CONFIGURED,
     CUSTOMER_BRIDGE_REQUEST_FAILED,
+    CUSTOMER_BRIDGE_SUBSCRIPTION_NOT_CACHED,
     CUSTOMER_BRIDGE_UNAVAILABLE,
     CUSTOMER_NOT_FOUND,
     DATA_INTEGRITY_ERROR,
@@ -26,6 +28,7 @@ from app.common.services.bridge_client import (
     BridgeClient,
     BridgeConnectionError,
     BridgeHealthResult,
+    BridgeSubscriptionResult,
     BridgeInvalidResponseError,
     BridgeRequest,
     BridgeUnauthorizedError,
@@ -202,6 +205,7 @@ class CustomerBridgeConfigService:
             setattr(bridge_config, field_name, field_value)
         if update_data:
             self.clear_health_status(bridge_config=bridge_config)
+            self.clear_subscription_cache(bridge_config=bridge_config)
         try:
             self._db_session.commit()
         except IntegrityError as exc:
@@ -218,6 +222,15 @@ class CustomerBridgeConfigService:
         bridge_config.last_health_checked_at = None
         bridge_config.last_health_error = None
 
+    def clear_subscription_cache(self, bridge_config: CustomerBridgeConfig) -> None:
+        bridge_config.cached_subscription_start_date = None
+        bridge_config.cached_subscription_end_date = None
+        bridge_config.cached_subscription_grace_period_end_date = None
+        bridge_config.cached_subscription_is_active = None
+        bridge_config.cached_subscription_status_message = None
+        bridge_config.last_subscription_synced_at = None
+        bridge_config.last_subscription_error = None
+
     def persist_health_status(
         self,
         bridge_config: CustomerBridgeConfig,
@@ -229,6 +242,49 @@ class CustomerBridgeConfigService:
         bridge_config.last_online_status = is_online
         bridge_config.last_health_checked_at = checked_at
         bridge_config.last_health_error = error
+        self._db_session.commit()
+        self._db_session.refresh(bridge_config)
+        return bridge_config
+
+    def persist_subscription_snapshot(
+        self,
+        bridge_config: CustomerBridgeConfig,
+        *,
+        subscription: BridgeSubscriptionResult,
+        checked_at: datetime,
+    ) -> CustomerBridgeConfig:
+        bridge_config.cached_subscription_start_date = subscription.start_date
+        bridge_config.cached_subscription_end_date = subscription.end_date
+        bridge_config.cached_subscription_grace_period_end_date = subscription.grace_period_end_date
+        bridge_config.cached_subscription_is_active = subscription.is_active
+        bridge_config.cached_subscription_status_message = subscription.status_message
+        bridge_config.last_subscription_synced_at = checked_at
+        bridge_config.last_subscription_error = None
+        self._db_session.commit()
+        self._db_session.refresh(bridge_config)
+        return bridge_config
+
+    def persist_subscription_absence(
+        self,
+        bridge_config: CustomerBridgeConfig,
+        *,
+        checked_at: datetime,
+        error: str,
+    ) -> CustomerBridgeConfig:
+        self.clear_subscription_cache(bridge_config=bridge_config)
+        bridge_config.last_subscription_synced_at = checked_at
+        bridge_config.last_subscription_error = error
+        self._db_session.commit()
+        self._db_session.refresh(bridge_config)
+        return bridge_config
+
+    def persist_subscription_refresh_error(
+        self,
+        bridge_config: CustomerBridgeConfig,
+        *,
+        error: str,
+    ) -> CustomerBridgeConfig:
+        bridge_config.last_subscription_error = error
         self._db_session.commit()
         self._db_session.refresh(bridge_config)
         return bridge_config
@@ -396,6 +452,95 @@ class CustomerBridgeService:
             ) from exc
         return customer, bridge_config, bridge_capabilities
 
+    def get_subscription(
+        self,
+        customer_id: int,
+    ) -> tuple[Customer, CustomerBridgeConfig]:
+        customer, bridge_config = self._bridge_config_service.get_active(customer_id=customer_id)
+        self._config_resolver.resolve(
+            customer=customer,
+            bridge_config=bridge_config,
+        )
+        if bridge_config is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "message": CUSTOMER_BRIDGE_SUBSCRIPTION_NOT_CACHED,
+                    "developer_message": (
+                        f"Customer {customer.id} does not have a bridge configuration record."
+                    ),
+                },
+            )
+        has_cached_subscription = (
+            bridge_config.cached_subscription_start_date is not None
+            and bridge_config.cached_subscription_end_date is not None
+            and bridge_config.cached_subscription_is_active is not None
+        )
+        if has_cached_subscription:
+            return customer, bridge_config
+        cached_message = (
+            bridge_config.last_subscription_error
+            or CUSTOMER_BRIDGE_SUBSCRIPTION_NOT_CACHED
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "message": cached_message,
+                "developer_message": (
+                    f"Customer {customer.id} does not have a cached bridge subscription. "
+                    "Run the subscription refresh endpoint first."
+                ),
+            },
+        )
+
+    def refresh_subscription(
+        self,
+        customer_id: int,
+        correlation_id: str | None = None,
+    ) -> tuple[Customer, CustomerBridgeConfig | None]:
+        customer, bridge_config, request = self._build_request(
+            customer_id=customer_id,
+            correlation_id=correlation_id,
+        )
+        checked_at = datetime.now(timezone.utc)
+        try:
+            bridge_subscription = self._bridge_client.get_active_subscription(
+                request=request,
+            )
+        except (
+            BridgeConnectionError,
+            BridgeUnauthorizedError,
+            BridgeUnexpectedStatusError,
+            BridgeInvalidResponseError,
+        ) as exc:
+            if bridge_config is not None:
+                if (
+                    isinstance(exc, BridgeUnexpectedStatusError)
+                    and exc.status_code == status.HTTP_404_NOT_FOUND
+                ):
+                    bridge_config = self._bridge_config_service.persist_subscription_absence(
+                        bridge_config=bridge_config,
+                        checked_at=checked_at,
+                        error=self._build_subscription_error_message(exc),
+                    )
+                else:
+                    bridge_config = self._bridge_config_service.persist_subscription_refresh_error(
+                        bridge_config=bridge_config,
+                        error=self._build_subscription_error_message(exc),
+                    )
+            raise self._map_subscription_error(
+                customer=customer,
+                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                exc=exc,
+            ) from exc
+        if bridge_config is not None:
+            bridge_config = self._bridge_config_service.persist_subscription_snapshot(
+                bridge_config=bridge_config,
+                subscription=bridge_subscription,
+                checked_at=checked_at,
+            )
+        return customer, bridge_config
+
     def _build_request(
         self,
         customer_id: int,
@@ -474,6 +619,41 @@ class CustomerBridgeService:
             results.append(self.refresh_status(customer_id=customer_id))
         return results
 
+    def _map_subscription_error(
+        self,
+        customer: Customer,
+        bridge_base_url: str | None,
+        exc: (
+            BridgeConnectionError
+            | BridgeUnauthorizedError
+            | BridgeUnexpectedStatusError
+            | BridgeInvalidResponseError
+        ),
+    ) -> HTTPException:
+        if (
+            isinstance(exc, BridgeUnexpectedStatusError)
+            and exc.status_code == status.HTTP_404_NOT_FOUND
+        ):
+            upstream_message = (
+                self._extract_bridge_error_message(response_body=exc.response_body)
+                or "هیچ اشتراک فعالی وجود ندارد."
+            )
+            return HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "message": upstream_message,
+                    "developer_message": (
+                        f"Bridge subscription request for customer {customer.id} "
+                        f"at {bridge_base_url} returned status 404."
+                    ),
+                },
+            )
+        return self._map_bridge_error(
+            customer=customer,
+            bridge_base_url=bridge_base_url,
+            exc=exc,
+        )
+
     def _build_health_error_message(
         self,
         exc: (
@@ -484,6 +664,43 @@ class CustomerBridgeService:
         ),
     ) -> str:
         return str(exc)
+
+    def _build_subscription_error_message(
+        self,
+        exc: (
+            BridgeConnectionError
+            | BridgeUnauthorizedError
+            | BridgeUnexpectedStatusError
+            | BridgeInvalidResponseError
+        ),
+    ) -> str:
+        if isinstance(exc, BridgeConnectionError):
+            return CUSTOMER_BRIDGE_UNAVAILABLE
+        if isinstance(exc, BridgeUnauthorizedError):
+            return CUSTOMER_BRIDGE_AUTH_FAILED
+        if isinstance(exc, BridgeUnexpectedStatusError):
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                return (
+                    self._extract_bridge_error_message(response_body=exc.response_body)
+                    or "هیچ اشتراک فعالی وجود ندارد."
+                )
+            return CUSTOMER_BRIDGE_REQUEST_FAILED
+        return CUSTOMER_BRIDGE_INVALID_RESPONSE
+
+    def _extract_bridge_error_message(self, response_body: str | None) -> str | None:
+        if not response_body:
+            return None
+        try:
+            payload = json.loads(response_body)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        for field_name in ("error", "message", "detail"):
+            field_value = payload.get(field_name)
+            if isinstance(field_value, str) and field_value.strip():
+                return field_value.strip()
+        return None
 
 
 def get_customer_service(

@@ -10,6 +10,7 @@ from app.modules.customers.dtos import (
     CustomerBridgeConfigOut,
     CustomerBridgeConfigUpdate,
     CustomerBridgeHealthOut,
+    CustomerBridgeSubscriptionOut,
     CustomerCreate,
     CustomerListOut,
     CustomerOut,
@@ -341,4 +342,68 @@ def get_customer_bridge_capabilities(
         customer=customer,
         bridge_config=bridge_config,
         bridge_capabilities=bridge_capabilities,
+    )
+
+
+@router.get(
+    "/{customer_id}/bridge/subscriptions/active",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=CustomerBridgeSubscriptionOut,
+    summary="Get customer bridge subscription",
+    description="Return the cached main app subscription snapshot for a customer without calling the main app.",
+    responses={
+        200: {"description": "Cached customer bridge subscription returned."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer not found or cached subscription data is unavailable."},
+        409: {"description": "Customer bridge configuration is incomplete."},
+    },
+)
+def get_customer_bridge_subscription(
+    customer_id: int,
+    _: object = Depends(require_admin),
+    service: CustomerBridgeService = Depends(get_customer_bridge_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerBridgeSubscriptionOut:
+    customer, bridge_config = service.get_subscription(
+        customer_id=customer_id,
+    )
+    return mapper.to_bridge_subscription_out(
+        customer=customer,
+        bridge_config=bridge_config,
+    )
+
+
+@router.post(
+    "/{customer_id}/bridge/subscriptions/refresh",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=CustomerBridgeSubscriptionOut,
+    summary="Refresh customer bridge subscription",
+    description="Fetch the latest subscription snapshot from the configured main app and store it locally for future reads.",
+    responses={
+        200: {"description": "Customer bridge subscription refreshed and cached."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer not found or no active upstream subscription exists."},
+        409: {"description": "Customer bridge configuration is incomplete."},
+        502: {"description": "Customer bridge returned an invalid or unauthorized response."},
+        503: {"description": "Customer bridge is unreachable."},
+    },
+)
+def refresh_customer_bridge_subscription(
+    customer_id: int,
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to the customer bridge.",
+    ),
+    _: object = Depends(require_admin),
+    service: CustomerBridgeService = Depends(get_customer_bridge_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerBridgeSubscriptionOut:
+    customer, bridge_config = service.refresh_subscription(
+        customer_id=customer_id,
+        correlation_id=x_correlation_id,
+    )
+    return mapper.to_bridge_subscription_out(
+        customer=customer,
+        bridge_config=bridge_config,
     )
