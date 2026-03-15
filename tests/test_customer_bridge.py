@@ -6,15 +6,17 @@ from app.common.enums import UserRole
 from app.common.messages import (
     CUSTOMER_BRIDGE_AUTH_FAILED,
     CUSTOMER_BRIDGE_NOT_CONFIGURED,
-    CUSTOMER_BRIDGE_SUBSCRIPTION_NOT_CACHED,
     CUSTOMER_BRIDGE_UNAVAILABLE,
 )
 from app.common.services.bridge_client import (
+    BridgeClient,
     BridgeCapabilitiesResult,
     BridgeCapability,
     BridgeConnectionError,
     BridgeHealthResult,
     BridgeRequest,
+    BridgeSubscriptionConfigResult,
+    BridgeSubscriptionMessageResult,
     BridgeSubscriptionResult,
     BridgeUnauthorizedError,
     BridgeUnexpectedStatusError,
@@ -26,7 +28,7 @@ from app.modules.users.schemas import User
 
 class RecordingBridgeClient:
     def __init__(self) -> None:
-        self.requests: list[tuple[str, BridgeRequest]] = []
+        self.requests: list[tuple[object, ...]] = []
 
     def get_health(self, request: BridgeRequest) -> BridgeHealthResult:
         self.requests.append(("health", request))
@@ -57,13 +59,114 @@ class RecordingBridgeClient:
 
     def get_active_subscription(self, request: BridgeRequest) -> BridgeSubscriptionResult:
         self.requests.append(("subscription", request))
+        return self._build_subscription_result()
+
+    def update_active_subscription(
+        self,
+        request: BridgeRequest,
+        payload: dict[str, object],
+    ) -> BridgeSubscriptionResult:
+        self.requests.append(("subscription-update", request, payload))
+        current = self._build_subscription_result()
         return BridgeSubscriptionResult(
-            start_date="1405-01-01 00:00:00",
-            end_date="1405-02-01 00:00:00",
-            grace_period_end_date="1405-02-10 00:00:00",
+            start_date=current.start_date,
+            end_date=payload.get("end_date", current.end_date),
+            grace_period_end_date=payload.get(
+                "grace_period_end_date",
+                current.grace_period_end_date,
+            ),
+            is_active=payload.get("is_active", current.is_active),
+            status_message=current.status_message,
+        )
+
+    def get_subscription_messages(
+        self,
+        request: BridgeRequest,
+    ) -> list[BridgeSubscriptionMessageResult]:
+        self.requests.append(("subscription-messages", request))
+        return self._build_subscription_messages()
+
+    def upsert_subscription_messages(
+        self,
+        request: BridgeRequest,
+        payload: list[dict[str, object]],
+    ) -> list[BridgeSubscriptionMessageResult]:
+        self.requests.append(("subscription-messages-update", request, payload))
+        return [
+            BridgeSubscriptionMessageResult(
+                status=item["status"],
+                message_template=item["message_template"],
+            )
+            for item in payload
+        ]
+
+    def get_subscription_config(
+        self,
+        request: BridgeRequest,
+    ) -> BridgeSubscriptionConfigResult:
+        self.requests.append(("subscription-config", request))
+        return BridgeSubscriptionConfigResult(
+            subscription=self._build_subscription_result(),
+            messages=self._build_subscription_messages(),
+        )
+
+    def sync_subscription_config(
+        self,
+        request: BridgeRequest,
+        payload: dict[str, object],
+    ) -> BridgeSubscriptionConfigResult:
+        self.requests.append(("subscription-config-sync", request, payload))
+        current = self._build_subscription_result()
+        subscription_payload = payload.get("subscription") or {}
+        messages_payload = payload.get("messages")
+        return BridgeSubscriptionConfigResult(
+            subscription=BridgeSubscriptionResult(
+                start_date=current.start_date,
+                end_date=subscription_payload.get("end_date", current.end_date),
+                grace_period_end_date=subscription_payload.get(
+                    "grace_period_end_date",
+                    current.grace_period_end_date,
+                ),
+                is_active=subscription_payload.get("is_active", current.is_active),
+                status_message=current.status_message,
+            ),
+            messages=(
+                [
+                    BridgeSubscriptionMessageResult(
+                        status=item["status"],
+                        message_template=item["message_template"],
+                    )
+                    for item in messages_payload
+                ]
+                if isinstance(messages_payload, list)
+                else self._build_subscription_messages()
+            ),
+        )
+
+    def _build_subscription_result(self) -> BridgeSubscriptionResult:
+        return BridgeSubscriptionResult(
+            start_date="1405-01-01T00:00:00+0330",
+            end_date="1405-02-01T00:00:00+0330",
+            grace_period_end_date="1405-02-10T00:00:00+0330",
             is_active=True,
             status_message="",
         )
+
+    def _build_subscription_messages(self) -> list[BridgeSubscriptionMessageResult]:
+        return [
+            BridgeSubscriptionMessageResult(
+                status="expired",
+                message_template="اشتراک شما به پایان رسیده است.",
+            ),
+            BridgeSubscriptionMessageResult(
+                status="grace",
+                message_template="مهلت شما {days} روز دیگر ادامه دارد.",
+            ),
+            BridgeSubscriptionMessageResult(
+                status="near_expiry",
+                message_template="اشتراک شما {days} روز دیگر منقضی می‌شود.",
+            ),
+        ]
 
 
 class UnavailableBridgeClient:
@@ -79,6 +182,41 @@ class UnavailableBridgeClient:
         del request
         raise BridgeConnectionError("timed out")
 
+    def update_active_subscription(
+        self,
+        request: BridgeRequest,
+        payload: dict[str, object],
+    ) -> BridgeSubscriptionResult:
+        del request, payload
+        raise BridgeConnectionError("timed out")
+
+    def get_subscription_messages(
+        self,
+        request: BridgeRequest,
+    ) -> list[BridgeSubscriptionMessageResult]:
+        del request
+        raise BridgeConnectionError("timed out")
+
+    def upsert_subscription_messages(
+        self,
+        request: BridgeRequest,
+        payload: list[dict[str, object]],
+    ) -> list[BridgeSubscriptionMessageResult]:
+        del request, payload
+        raise BridgeConnectionError("timed out")
+
+    def get_subscription_config(self, request: BridgeRequest) -> BridgeSubscriptionConfigResult:
+        del request
+        raise BridgeConnectionError("timed out")
+
+    def sync_subscription_config(
+        self,
+        request: BridgeRequest,
+        payload: dict[str, object],
+    ) -> BridgeSubscriptionConfigResult:
+        del request, payload
+        raise BridgeConnectionError("timed out")
+
 
 class UnauthorizedBridgeClient:
     def get_health(self, request: BridgeRequest) -> BridgeHealthResult:
@@ -91,6 +229,41 @@ class UnauthorizedBridgeClient:
 
     def get_active_subscription(self, request: BridgeRequest) -> BridgeSubscriptionResult:
         del request
+        raise BridgeUnauthorizedError(status_code=401)
+
+    def update_active_subscription(
+        self,
+        request: BridgeRequest,
+        payload: dict[str, object],
+    ) -> BridgeSubscriptionResult:
+        del request, payload
+        raise BridgeUnauthorizedError(status_code=401)
+
+    def get_subscription_messages(
+        self,
+        request: BridgeRequest,
+    ) -> list[BridgeSubscriptionMessageResult]:
+        del request
+        raise BridgeUnauthorizedError(status_code=401)
+
+    def upsert_subscription_messages(
+        self,
+        request: BridgeRequest,
+        payload: list[dict[str, object]],
+    ) -> list[BridgeSubscriptionMessageResult]:
+        del request, payload
+        raise BridgeUnauthorizedError(status_code=401)
+
+    def get_subscription_config(self, request: BridgeRequest) -> BridgeSubscriptionConfigResult:
+        del request
+        raise BridgeUnauthorizedError(status_code=401)
+
+    def sync_subscription_config(
+        self,
+        request: BridgeRequest,
+        payload: dict[str, object],
+    ) -> BridgeSubscriptionConfigResult:
+        del request, payload
         raise BridgeUnauthorizedError(status_code=401)
 
 
@@ -112,6 +285,34 @@ class MissingSubscriptionBridgeClient:
             status_code=404,
             response_body='{"error":"هیچ اشتراک فعالی وجود ندارد."}',
         )
+
+    def get_subscription_config(self, request: BridgeRequest) -> BridgeSubscriptionConfigResult:
+        self.requests.append(("subscription-config", request))
+        raise BridgeUnexpectedStatusError(
+            status_code=404,
+            response_body='{"error":"هیچ اشتراک فعالی وجود ندارد."}',
+        )
+
+def test_bridge_client_normalizes_iso_like_jalali_subscription_datetimes() -> None:
+    bridge_client = BridgeClient()
+
+    result = bridge_client._parse_subscription(  # noqa: SLF001
+        {
+            "start_date": "1404-01-01T03:30:00+0330",
+            "end_date": "1404-04-29T02:30:00+0330",
+            "grace_period_end_date": "1404-04-10T02:30:00+0330",
+            "is_active": True,
+            "status_message": "",
+        }
+    )
+
+    assert result == BridgeSubscriptionResult(
+        start_date="1404-01-01 03:30:00",
+        end_date="1404-04-29 02:30:00",
+        grace_period_end_date="1404-04-10 02:30:00",
+        is_active=True,
+        status_message="",
+    )
 
 
 def _create_admin(db_session: Session) -> User:
@@ -300,40 +501,18 @@ def test_customer_bridge_subscription_uses_customer_configuration(
     )
     assert bridge_update_response.status_code == 200
 
-    uncached_response = client.get(
+    active_response = client.get(
         f"/customers/{customer_id}/bridge/subscriptions/active",
-        headers=headers,
-    )
-    assert uncached_response.status_code == 404
-    assert uncached_response.json()["message"] == CUSTOMER_BRIDGE_SUBSCRIPTION_NOT_CACHED
-    assert bridge_client.requests == []
-
-    refresh_response = client.post(
-        f"/customers/{customer_id}/bridge/subscriptions/refresh",
         headers={**headers, "X-Correlation-ID": "corr-subscription"},
     )
-    assert refresh_response.status_code == 200
-    refresh_data = refresh_response.json()
-    assert refresh_data == {
-        "customer_id": customer_id,
-        "customer_name": "Subscription Customer",
-        "bridge_base_url": "https://subscription.example.com",
+    assert active_response.status_code == 200
+    assert active_response.json() == {
         "start_date": "1405-01-01 00:00:00",
         "end_date": "1405-02-01 00:00:00",
         "grace_period_end_date": "1405-02-10 00:00:00",
         "is_active": True,
         "status_message": "",
-        "last_subscription_synced_at": refresh_data["last_subscription_synced_at"],
-        "last_subscription_error": None,
     }
-    assert refresh_data["last_subscription_synced_at"] is not None
-
-    cached_response = client.get(
-        f"/customers/{customer_id}/bridge/subscriptions/active",
-        headers=headers,
-    )
-    assert cached_response.status_code == 200
-    assert cached_response.json() == refresh_data
 
     assert bridge_client.requests == [(
         "subscription",
@@ -371,6 +550,146 @@ def test_customer_bridge_health_rejects_incomplete_bridge_configuration(
     assert "bridge_is_enabled" in response.json()["developer_message"]
 
 
+def test_customer_bridge_subscription_config_fetch_and_sync_use_customer_configuration(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    bridge_client = RecordingBridgeClient()
+    app.dependency_overrides[get_bridge_client] = lambda: bridge_client
+    headers = _admin_headers(client=client, db_session=db_session)
+
+    customer_response = client.post(
+        "/customers",
+        headers=headers,
+        json={
+            "name": "Config Customer",
+            "grade": 2,
+        },
+    )
+    assert customer_response.status_code == 201
+    customer_id = customer_response.json()["id"]
+
+    bridge_update_response = client.patch(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+        json={
+            "bridge_base_url": "https://subscription.example.com/",
+            "bridge_api_key": "bridge-secret",
+            "bridge_is_enabled": True,
+        },
+    )
+    assert bridge_update_response.status_code == 200
+
+    config_response = client.get(
+        f"/customers/{customer_id}/bridge/subscriptions/config",
+        headers={**headers, "X-Correlation-ID": "corr-config"},
+    )
+    assert config_response.status_code == 200
+    assert config_response.json() == {
+        "subscription": {
+            "start_date": "1405-01-01 00:00:00",
+            "end_date": "1405-02-01 00:00:00",
+            "grace_period_end_date": "1405-02-10 00:00:00",
+            "is_active": True,
+            "status_message": "",
+        },
+        "messages": [
+            {
+                "status": "expired",
+                "message_template": "اشتراک شما به پایان رسیده است.",
+            },
+            {
+                "status": "grace",
+                "message_template": "مهلت شما {days} روز دیگر ادامه دارد.",
+            },
+            {
+                "status": "near_expiry",
+                "message_template": "اشتراک شما {days} روز دیگر منقضی می‌شود.",
+            },
+        ],
+    }
+
+    sync_response = client.patch(
+        f"/customers/{customer_id}/bridge/subscriptions/config",
+        headers={**headers, "X-Correlation-ID": "corr-sync"},
+        json={
+            "subscription": {
+                "end_date": "1405-03-01 00:00:00",
+                "grace_period_end_date": "1405-03-07 00:00:00",
+                "is_active": False,
+            },
+            "messages": [
+                {
+                    "status": "expired",
+                    "message_template": "اشتراک شما به پایان رسیده است.",
+                },
+                {
+                    "status": "grace",
+                    "message_template": "مهلت شما {days} روز دیگر ادامه دارد.",
+                },
+            ],
+        },
+    )
+    assert sync_response.status_code == 200
+    assert sync_response.json() == {
+        "subscription": {
+            "start_date": "1405-01-01 00:00:00",
+            "end_date": "1405-03-01 00:00:00",
+            "grace_period_end_date": "1405-03-07 00:00:00",
+            "is_active": False,
+            "status_message": "",
+        },
+        "messages": [
+            {
+                "status": "expired",
+                "message_template": "اشتراک شما به پایان رسیده است.",
+            },
+            {
+                "status": "grace",
+                "message_template": "مهلت شما {days} روز دیگر ادامه دارد.",
+            },
+        ],
+    }
+
+    assert bridge_client.requests == [
+        (
+            "subscription-config",
+            BridgeRequest(
+                base_url="https://subscription.example.com",
+                api_key="bridge-secret",
+                timeout_seconds=10,
+                correlation_id="corr-config",
+            ),
+        ),
+        (
+            "subscription-config-sync",
+            BridgeRequest(
+                base_url="https://subscription.example.com",
+                api_key="bridge-secret",
+                timeout_seconds=10,
+                correlation_id="corr-sync",
+            ),
+            {
+                "subscription": {
+                    "end_date": "1405-03-01 00:00:00",
+                    "grace_period_end_date": "1405-03-07 00:00:00",
+                    "is_active": False,
+                },
+                "messages": [
+                    {
+                        "status": "expired",
+                        "message_template": "اشتراک شما به پایان رسیده است.",
+                    },
+                    {
+                        "status": "grace",
+                        "message_template": "مهلت شما {days} روز دیگر ادامه دارد.",
+                    },
+                ],
+            },
+        ),
+    ]
+
+
 def test_customer_bridge_subscription_maps_missing_upstream_subscription_to_not_found(
     client: TestClient,
     db_session: Session,
@@ -401,21 +720,15 @@ def test_customer_bridge_subscription_maps_missing_upstream_subscription_to_not_
     )
     assert bridge_update_response.status_code == 200
 
-    refresh_response = client.post(
-        f"/customers/{customer_id}/bridge/subscriptions/refresh",
-        headers=headers,
-    )
-    assert refresh_response.status_code == 404
-    response = refresh_response
-    assert response.json()["message"] == "هیچ اشتراک فعالی وجود ندارد."
-    assert "returned status 404" in response.json()["developer_message"]
-
-    cached_response = client.get(
+    active_response = client.get(
         f"/customers/{customer_id}/bridge/subscriptions/active",
         headers=headers,
     )
-    assert cached_response.status_code == 404
-    assert cached_response.json()["message"] == "هیچ اشتراک فعالی وجود ندارد."
+    assert active_response.status_code == 404
+    response = active_response
+    assert response.json()["message"] == "هیچ اشتراک فعالی وجود ندارد."
+    assert "returned status 404" in response.json()["developer_message"]
+
     assert bridge_client.requests == [(
         "subscription",
         BridgeRequest(
@@ -551,6 +864,43 @@ def test_customer_bridge_capabilities_maps_unauthorized_bridge_to_bad_gateway(
 
     response = client.get(
         f"/customers/{customer_id}/bridge/capabilities",
+        headers=headers,
+    )
+    assert response.status_code == 502
+    assert response.json()["message"] == CUSTOMER_BRIDGE_AUTH_FAILED
+    assert response.json()["detail"] == CUSTOMER_BRIDGE_AUTH_FAILED
+
+
+def test_customer_bridge_subscription_config_maps_unauthorized_bridge_to_bad_gateway(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    app.dependency_overrides[get_bridge_client] = lambda: UnauthorizedBridgeClient()
+    headers = _admin_headers(client=client, db_session=db_session)
+    customer_response = client.post(
+        "/customers",
+        headers=headers,
+        json={
+            "name": "Tabriz Customer",
+            "grade": 3,
+        },
+    )
+    assert customer_response.status_code == 201
+    customer_id = customer_response.json()["id"]
+
+    bridge_update_response = client.patch(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+        json={
+            "bridge_base_url": "https://tabriz.example.com",
+            "bridge_api_key": "bridge-secret",
+            "bridge_is_enabled": True,
+        },
+    )
+    assert bridge_update_response.status_code == 200
+
+    response = client.get(
+        f"/customers/{customer_id}/bridge/subscriptions/config",
         headers=headers,
     )
     assert response.status_code == 502

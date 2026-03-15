@@ -28,6 +28,8 @@ from app.common.services.bridge_client import (
     BridgeClient,
     BridgeConnectionError,
     BridgeHealthResult,
+    BridgeSubscriptionConfigResult,
+    BridgeSubscriptionMessageResult,
     BridgeSubscriptionResult,
     BridgeInvalidResponseError,
     BridgeRequest,
@@ -452,6 +454,210 @@ class CustomerBridgeService:
             ) from exc
         return customer, bridge_config, bridge_capabilities
 
+    def fetch_active_subscription(
+        self,
+        customer_id: int,
+        correlation_id: str | None = None,
+    ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeSubscriptionResult]:
+        customer, bridge_config, request = self._build_request(
+            customer_id=customer_id,
+            correlation_id=correlation_id,
+        )
+        checked_at = datetime.now(timezone.utc)
+        try:
+            bridge_subscription = self._bridge_client.get_active_subscription(request=request)
+        except (
+            BridgeConnectionError,
+            BridgeUnauthorizedError,
+            BridgeUnexpectedStatusError,
+            BridgeInvalidResponseError,
+        ) as exc:
+            self._handle_subscription_bridge_error(
+                bridge_config=bridge_config,
+                checked_at=checked_at,
+                exc=exc,
+            )
+            raise self._map_subscription_error(
+                customer=customer,
+                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                exc=exc,
+            ) from exc
+        if bridge_config is not None:
+            bridge_config = self._bridge_config_service.persist_subscription_snapshot(
+                bridge_config=bridge_config,
+                subscription=bridge_subscription,
+                checked_at=checked_at,
+            )
+        return customer, bridge_config, bridge_subscription
+
+    def update_bridge_subscription(
+        self,
+        customer_id: int,
+        payload: dict[str, object],
+        correlation_id: str | None = None,
+    ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeSubscriptionResult]:
+        customer, bridge_config, request = self._build_request(
+            customer_id=customer_id,
+            correlation_id=correlation_id,
+        )
+        checked_at = datetime.now(timezone.utc)
+        try:
+            bridge_subscription = self._bridge_client.update_active_subscription(
+                request=request,
+                payload=payload,
+            )
+        except (
+            BridgeConnectionError,
+            BridgeUnauthorizedError,
+            BridgeUnexpectedStatusError,
+            BridgeInvalidResponseError,
+        ) as exc:
+            self._handle_subscription_bridge_error(
+                bridge_config=bridge_config,
+                checked_at=checked_at,
+                exc=exc,
+            )
+            raise self._map_subscription_error(
+                customer=customer,
+                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                exc=exc,
+            ) from exc
+        if bridge_config is not None:
+            bridge_config = self._bridge_config_service.persist_subscription_snapshot(
+                bridge_config=bridge_config,
+                subscription=bridge_subscription,
+                checked_at=checked_at,
+            )
+        return customer, bridge_config, bridge_subscription
+
+    def get_subscription_messages(
+        self,
+        customer_id: int,
+        correlation_id: str | None = None,
+    ) -> tuple[Customer, CustomerBridgeConfig | None, list[BridgeSubscriptionMessageResult]]:
+        customer, bridge_config, request = self._build_request(
+            customer_id=customer_id,
+            correlation_id=correlation_id,
+        )
+        try:
+            bridge_messages = self._bridge_client.get_subscription_messages(request=request)
+        except (
+            BridgeConnectionError,
+            BridgeUnauthorizedError,
+            BridgeUnexpectedStatusError,
+            BridgeInvalidResponseError,
+        ) as exc:
+            raise self._map_bridge_error(
+                customer=customer,
+                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                exc=exc,
+            ) from exc
+        return customer, bridge_config, bridge_messages
+
+    def upsert_subscription_messages(
+        self,
+        customer_id: int,
+        payload: list[dict[str, object]],
+        correlation_id: str | None = None,
+    ) -> tuple[Customer, CustomerBridgeConfig | None, list[BridgeSubscriptionMessageResult]]:
+        customer, bridge_config, request = self._build_request(
+            customer_id=customer_id,
+            correlation_id=correlation_id,
+        )
+        try:
+            bridge_messages = self._bridge_client.upsert_subscription_messages(
+                request=request,
+                payload=payload,
+            )
+        except (
+            BridgeConnectionError,
+            BridgeUnauthorizedError,
+            BridgeUnexpectedStatusError,
+            BridgeInvalidResponseError,
+        ) as exc:
+            raise self._map_bridge_error(
+                customer=customer,
+                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                exc=exc,
+            ) from exc
+        return customer, bridge_config, bridge_messages
+
+    def get_subscription_config(
+        self,
+        customer_id: int,
+        correlation_id: str | None = None,
+    ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeSubscriptionConfigResult]:
+        customer, bridge_config, request = self._build_request(
+            customer_id=customer_id,
+            correlation_id=correlation_id,
+        )
+        checked_at = datetime.now(timezone.utc)
+        try:
+            bridge_config_result = self._bridge_client.get_subscription_config(request=request)
+        except (
+            BridgeConnectionError,
+            BridgeUnauthorizedError,
+            BridgeUnexpectedStatusError,
+            BridgeInvalidResponseError,
+        ) as exc:
+            self._handle_subscription_bridge_error(
+                bridge_config=bridge_config,
+                checked_at=checked_at,
+                exc=exc,
+            )
+            raise self._map_subscription_error(
+                customer=customer,
+                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                exc=exc,
+            ) from exc
+        if bridge_config is not None:
+            bridge_config = self._bridge_config_service.persist_subscription_snapshot(
+                bridge_config=bridge_config,
+                subscription=bridge_config_result.subscription,
+                checked_at=checked_at,
+            )
+        return customer, bridge_config, bridge_config_result
+
+    def sync_subscription_config(
+        self,
+        customer_id: int,
+        payload: dict[str, object],
+        correlation_id: str | None = None,
+    ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeSubscriptionConfigResult]:
+        customer, bridge_config, request = self._build_request(
+            customer_id=customer_id,
+            correlation_id=correlation_id,
+        )
+        checked_at = datetime.now(timezone.utc)
+        try:
+            bridge_config_result = self._bridge_client.sync_subscription_config(
+                request=request,
+                payload=payload,
+            )
+        except (
+            BridgeConnectionError,
+            BridgeUnauthorizedError,
+            BridgeUnexpectedStatusError,
+            BridgeInvalidResponseError,
+        ) as exc:
+            self._handle_subscription_bridge_error(
+                bridge_config=bridge_config,
+                checked_at=checked_at,
+                exc=exc,
+            )
+            raise self._map_subscription_error(
+                customer=customer,
+                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                exc=exc,
+            ) from exc
+        if bridge_config is not None:
+            bridge_config = self._bridge_config_service.persist_subscription_snapshot(
+                bridge_config=bridge_config,
+                subscription=bridge_config_result.subscription,
+                checked_at=checked_at,
+            )
+        return customer, bridge_config, bridge_config_result
+
     def get_subscription(
         self,
         customer_id: int,
@@ -686,6 +892,31 @@ class CustomerBridgeService:
                 )
             return CUSTOMER_BRIDGE_REQUEST_FAILED
         return CUSTOMER_BRIDGE_INVALID_RESPONSE
+
+    def _handle_subscription_bridge_error(
+        self,
+        bridge_config: CustomerBridgeConfig | None,
+        checked_at: datetime,
+        exc: (
+            BridgeConnectionError
+            | BridgeUnauthorizedError
+            | BridgeUnexpectedStatusError
+            | BridgeInvalidResponseError
+        ),
+    ) -> None:
+        if bridge_config is None:
+            return
+        if isinstance(exc, BridgeUnexpectedStatusError) and exc.status_code == status.HTTP_404_NOT_FOUND:
+            self._bridge_config_service.persist_subscription_absence(
+                bridge_config=bridge_config,
+                checked_at=checked_at,
+                error=self._build_subscription_error_message(exc),
+            )
+            return
+        self._bridge_config_service.persist_subscription_refresh_error(
+            bridge_config=bridge_config,
+            error=self._build_subscription_error_message(exc),
+        )
 
     def _extract_bridge_error_message(self, response_body: str | None) -> str | None:
         if not response_body:

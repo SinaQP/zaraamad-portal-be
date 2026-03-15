@@ -15,7 +15,7 @@ This backend currently provides:
 - Service project, group, and catalog management
 - Customer-specific service pricing and pricing summary
 - Customer service purchase selection with stored totals
-- Customer bridge health, capability, and cached subscription lookup
+- Customer bridge health, capability, cached subscription lookup, and remote subscription management
 - Standardized API error responses
 - Search, sorting, pagination, and soft deactivation
 
@@ -62,6 +62,7 @@ app/
     auth/
     customers/
     service_catalog/
+    subscriptions/
     users/
   main.py
   version.py
@@ -237,6 +238,11 @@ Customer bridge:
 - `GET /customers/{customer_id}/bridge/health`
 - `GET /customers/{customer_id}/bridge/capabilities`
 - `GET /customers/{customer_id}/bridge/subscriptions/active`
+- `PATCH /customers/{customer_id}/bridge/subscriptions/active`
+- `GET /customers/{customer_id}/bridge/subscriptions/messages`
+- `PATCH /customers/{customer_id}/bridge/subscriptions/messages`
+- `GET /customers/{customer_id}/bridge/subscriptions/config`
+- `PATCH /customers/{customer_id}/bridge/subscriptions/config`
 - `POST /customers/{customer_id}/bridge/subscriptions/refresh`
 
 Users:
@@ -322,6 +328,8 @@ Pagination metadata is returned in response headers:
 - customer service purchases store the selected `customer_service_config_id` rows as purchase snapshots
 - purchase totals are persisted from the selected config prices at the time of create/update
 - disabled or inactive customer service configs cannot be selected in a purchase
+- customer bridge subscription management resolves the configured `bridge_base_url` and `bridge_api_key` from the requested customer
+- subscription bridge date fields use Jalali datetime strings in `YYYY-MM-DD HH:MM:SS` format
 
 Service catalog hierarchy:
 

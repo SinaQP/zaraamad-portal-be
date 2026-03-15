@@ -25,6 +25,18 @@ from app.modules.customers.service import (
     get_customer_bridge_config_service,
     get_customer_service,
 )
+from app.modules.subscriptions.dtos import (
+    BridgeSubscriptionConfigOut,
+    BridgeSubscriptionConfigUpdate,
+    BridgeSubscriptionMessageOut,
+    BridgeSubscriptionMessageUpdate,
+    BridgeSubscriptionOut,
+    BridgeSubscriptionUpdate,
+)
+from app.modules.subscriptions.mappers import (
+    SubscriptionBridgeMapper,
+    get_subscription_bridge_mapper,
+)
 
 CUSTOMERS_TAG = "customers"
 CUSTOMER_BRIDGE_TAG = "customer-bridge"
@@ -348,28 +360,211 @@ def get_customer_bridge_capabilities(
 @router.get(
     "/{customer_id}/bridge/subscriptions/active",
     tags=[CUSTOMER_BRIDGE_TAG],
-    response_model=CustomerBridgeSubscriptionOut,
+    response_model=BridgeSubscriptionOut,
     summary="Get customer bridge subscription",
-    description="Return the cached main app subscription snapshot for a customer without calling the main app.",
+    description="Call the configured main app subscription endpoint for a customer.",
     responses={
-        200: {"description": "Cached customer bridge subscription returned."},
+        200: {"description": "Customer bridge subscription returned."},
         403: {"description": "Admin access required."},
-        404: {"description": "Customer not found or cached subscription data is unavailable."},
+        404: {"description": "Customer not found or no active upstream subscription exists."},
         409: {"description": "Customer bridge configuration is incomplete."},
+        502: {"description": "Customer bridge returned an invalid or unauthorized response."},
+        503: {"description": "Customer bridge is unreachable."},
     },
 )
 def get_customer_bridge_subscription(
     customer_id: int,
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to the customer bridge.",
+    ),
     _: object = Depends(require_admin),
     service: CustomerBridgeService = Depends(get_customer_bridge_service),
-    mapper: CustomerMapper = Depends(get_customer_mapper),
-) -> CustomerBridgeSubscriptionOut:
-    customer, bridge_config = service.get_subscription(
+    mapper: SubscriptionBridgeMapper = Depends(get_subscription_bridge_mapper),
+) -> BridgeSubscriptionOut:
+    _, _, bridge_subscription = service.fetch_active_subscription(
         customer_id=customer_id,
+        correlation_id=x_correlation_id,
     )
-    return mapper.to_bridge_subscription_out(
-        customer=customer,
-        bridge_config=bridge_config,
+    return mapper.to_subscription_out(
+        subscription=bridge_subscription,
+    )
+
+
+@router.patch(
+    "/{customer_id}/bridge/subscriptions/active",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=BridgeSubscriptionOut,
+    summary="Update customer bridge subscription",
+    description="Update the active subscription through the configured customer bridge.",
+    responses={
+        200: {"description": "Customer bridge subscription updated."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer not found or no active upstream subscription exists."},
+        409: {"description": "Customer bridge configuration is incomplete."},
+        422: {"description": "Request payload is incomplete or invalid."},
+        502: {"description": "Customer bridge returned an invalid or unauthorized response."},
+        503: {"description": "Customer bridge is unreachable."},
+    },
+)
+def update_customer_bridge_subscription(
+    customer_id: int,
+    payload: BridgeSubscriptionUpdate,
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to the customer bridge.",
+    ),
+    _: object = Depends(require_admin),
+    service: CustomerBridgeService = Depends(get_customer_bridge_service),
+    mapper: SubscriptionBridgeMapper = Depends(get_subscription_bridge_mapper),
+) -> BridgeSubscriptionOut:
+    _, _, bridge_subscription = service.update_bridge_subscription(
+        customer_id=customer_id,
+        payload=payload.model_dump(mode="json", exclude_unset=True, exclude_none=False),
+        correlation_id=x_correlation_id,
+    )
+    return mapper.to_subscription_out(
+        subscription=bridge_subscription,
+    )
+
+
+@router.get(
+    "/{customer_id}/bridge/subscriptions/messages",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=list[BridgeSubscriptionMessageOut],
+    summary="Get customer bridge subscription messages",
+    description="Return subscription message templates from the configured customer bridge.",
+    responses={
+        200: {"description": "Customer bridge subscription messages returned."},
+        403: {"description": "Admin access required."},
+        409: {"description": "Customer bridge configuration is incomplete."},
+        502: {"description": "Customer bridge returned an invalid or unauthorized response."},
+        503: {"description": "Customer bridge is unreachable."},
+    },
+)
+def get_customer_bridge_subscription_messages(
+    customer_id: int,
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to the customer bridge.",
+    ),
+    _: object = Depends(require_admin),
+    service: CustomerBridgeService = Depends(get_customer_bridge_service),
+    mapper: SubscriptionBridgeMapper = Depends(get_subscription_bridge_mapper),
+) -> list[BridgeSubscriptionMessageOut]:
+    _, _, bridge_messages = service.get_subscription_messages(
+        customer_id=customer_id,
+        correlation_id=x_correlation_id,
+    )
+    return mapper.to_messages_out(messages=bridge_messages)
+
+
+@router.patch(
+    "/{customer_id}/bridge/subscriptions/messages",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=list[BridgeSubscriptionMessageOut],
+    summary="Update customer bridge subscription messages",
+    description="Create or update subscription message templates through the configured customer bridge.",
+    responses={
+        200: {"description": "Customer bridge subscription messages updated."},
+        403: {"description": "Admin access required."},
+        409: {"description": "Customer bridge configuration is incomplete."},
+        422: {"description": "Request payload is invalid."},
+        502: {"description": "Customer bridge returned an invalid or unauthorized response."},
+        503: {"description": "Customer bridge is unreachable."},
+    },
+)
+def update_customer_bridge_subscription_messages(
+    customer_id: int,
+    payload: list[BridgeSubscriptionMessageUpdate],
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to the customer bridge.",
+    ),
+    _: object = Depends(require_admin),
+    service: CustomerBridgeService = Depends(get_customer_bridge_service),
+    mapper: SubscriptionBridgeMapper = Depends(get_subscription_bridge_mapper),
+) -> list[BridgeSubscriptionMessageOut]:
+    _, _, bridge_messages = service.upsert_subscription_messages(
+        customer_id=customer_id,
+        payload=[item.model_dump(mode="json") for item in payload],
+        correlation_id=x_correlation_id,
+    )
+    return mapper.to_messages_out(messages=bridge_messages)
+
+
+@router.get(
+    "/{customer_id}/bridge/subscriptions/config",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=BridgeSubscriptionConfigOut,
+    summary="Get customer bridge subscription config",
+    description="Return the combined subscription and message config from the configured customer bridge.",
+    responses={
+        200: {"description": "Customer bridge subscription config returned."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer not found or no active upstream subscription exists."},
+        409: {"description": "Customer bridge configuration is incomplete."},
+        502: {"description": "Customer bridge returned an invalid or unauthorized response."},
+        503: {"description": "Customer bridge is unreachable."},
+    },
+)
+def get_customer_bridge_subscription_config(
+    customer_id: int,
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to the customer bridge.",
+    ),
+    _: object = Depends(require_admin),
+    service: CustomerBridgeService = Depends(get_customer_bridge_service),
+    mapper: SubscriptionBridgeMapper = Depends(get_subscription_bridge_mapper),
+) -> BridgeSubscriptionConfigOut:
+    _, _, bridge_config_result = service.get_subscription_config(
+        customer_id=customer_id,
+        correlation_id=x_correlation_id,
+    )
+    return mapper.to_config_out(config=bridge_config_result)
+
+
+@router.patch(
+    "/{customer_id}/bridge/subscriptions/config",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=BridgeSubscriptionConfigOut,
+    summary="Sync customer bridge subscription config",
+    description="Atomically update the active subscription and/or message templates through the configured customer bridge.",
+    responses={
+        200: {"description": "Customer bridge subscription config updated."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer not found or no active upstream subscription exists."},
+        409: {"description": "Customer bridge configuration is incomplete."},
+        422: {"description": "Request payload is incomplete or invalid."},
+        502: {"description": "Customer bridge returned an invalid or unauthorized response."},
+        503: {"description": "Customer bridge is unreachable."},
+    },
+)
+def sync_customer_bridge_subscription_config(
+    customer_id: int,
+    payload: BridgeSubscriptionConfigUpdate,
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to the customer bridge.",
+    ),
+    _: object = Depends(require_admin),
+    service: CustomerBridgeService = Depends(get_customer_bridge_service),
+    mapper: SubscriptionBridgeMapper = Depends(get_subscription_bridge_mapper),
+) -> BridgeSubscriptionConfigOut:
+    _, _, bridge_config_result = service.sync_subscription_config(
+        customer_id=customer_id,
+        payload=payload.model_dump(mode="json", exclude_unset=True, exclude_none=False),
+        correlation_id=x_correlation_id,
+    )
+    return mapper.to_config_out(
+        config=bridge_config_result,
     )
 
 
