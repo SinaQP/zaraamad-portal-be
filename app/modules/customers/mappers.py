@@ -15,6 +15,7 @@ class CustomerMapper:
         return CustomerOut(
             id=customer.id,
             name=customer.name,
+            manager_name=customer.manager_name,
             grade=customer.grade,
             is_active=customer.is_active,
             created_at=customer.created_at,

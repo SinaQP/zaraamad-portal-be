@@ -28,6 +28,11 @@ class CustomerBridgeConfigNormalizer(MongoDTO):
 
 class CustomerBase(MongoDTO):
     name: str = Field(..., description="Customer name.", examples=["Tehran Customer"])
+    manager_name: str | None = Field(
+        default=None,
+        description="Customer manager or contract signatory name.",
+        examples=["Ali Rezaei"],
+    )
     grade: int = Field(..., description="Customer grade.", examples=[1])
 
 
@@ -47,6 +52,11 @@ class CustomerListOut(PaginatedResponse[CustomerOut]):
 
 class CustomerUpdate(MongoDTO):
     name: str | None = Field(default=None, description="Customer name.", examples=["Qom Customer"])
+    manager_name: str | None = Field(
+        default=None,
+        description="Customer manager or contract signatory name.",
+        examples=["Sara Ahmadi"],
+    )
     grade: int | None = Field(default=None, description="Customer grade.", examples=[2])
     is_active: bool | None = Field(
         default=None,

@@ -41,11 +41,13 @@ def test_admin_can_manage_customers_and_users(client: TestClient, db_session: Se
         headers=admin_headers,
         json={
             "name": "Tehran Customer",
+            "manager_name": "Ali Rezaei",
             "grade": 1,
         },
     )
     assert customer_response.status_code == 201
     customer_id = customer_response.json()["id"]
+    assert customer_response.json()["manager_name"] == "Ali Rezaei"
 
     user_response = client.post(
         "/users",
@@ -82,6 +84,14 @@ def test_admin_can_manage_customers_and_users(client: TestClient, db_session: Se
     )
     assert patch_response.status_code == 200
     assert patch_response.json()["full_name"] == "Customer One Updated"
+
+    update_customer_response = client.patch(
+        f"/customers/{customer_id}",
+        headers=admin_headers,
+        json={"manager_name": "Sara Ahmadi"},
+    )
+    assert update_customer_response.status_code == 200
+    assert update_customer_response.json()["manager_name"] == "Sara Ahmadi"
 
     deactivate_user_response = client.delete(f"/users/{user_id}", headers=admin_headers)
     assert deactivate_user_response.status_code == 200
@@ -223,9 +233,9 @@ def test_customers_list_supports_search_sort_and_pagination(
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
     for payload in [
-        {"name": "Alpha Customer", "grade": 1},
-        {"name": "Gamma Customer", "grade": 3},
-        {"name": "Beta Customer", "grade": 2},
+        {"name": "Alpha Customer", "manager_name": "Manager One", "grade": 1},
+        {"name": "Gamma Customer", "manager_name": "Manager Three", "grade": 3},
+        {"name": "Beta Customer", "manager_name": "Manager Two", "grade": 2},
     ]:
         response = client.post("/customers", headers=admin_headers, json=payload)
         assert response.status_code == 201
@@ -233,21 +243,22 @@ def test_customers_list_supports_search_sort_and_pagination(
     search_response = client.get(
         "/customers",
         headers=admin_headers,
-        params={"search": "beta"},
+        params={"search": "manager two"},
     )
     assert search_response.status_code == 200
     search_items = search_response.json()
     assert search_items["total_page"] == 1
     assert len(search_items["items"]) == 1
     assert search_items["items"][0]["name"] == "Beta Customer"
+    assert search_items["items"][0]["manager_name"] == "Manager Two"
     assert search_response.headers["X-Total-Count"] == "1"
 
     paged_response = client.get(
         "/customers",
         headers=admin_headers,
         params={
-            "sort_by": "grade",
-            "sort_order": "desc",
+            "sort_by": "manager_name",
+            "sort_order": "asc",
             "page": 2,
             "page_size": 2,
         },
@@ -256,7 +267,7 @@ def test_customers_list_supports_search_sort_and_pagination(
     paged_items = paged_response.json()
     assert paged_items["total_page"] == 2
     assert len(paged_items["items"]) == 1
-    assert paged_items["items"][0]["grade"] == 1
+    assert paged_items["items"][0]["manager_name"] == "Manager Two"
     assert paged_response.headers["X-Total-Count"] == "3"
     assert paged_response.headers["X-Page"] == "2"
     assert paged_response.headers["X-Page-Size"] == "2"
@@ -272,9 +283,9 @@ def test_get_all_customers_returns_all_items_without_pagination(
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
     for payload in [
-        {"name": "Alpha Customer", "grade": 1},
-        {"name": "Beta Customer", "grade": 2},
-        {"name": "Gamma Customer", "grade": 3},
+        {"name": "Alpha Customer", "manager_name": "Alpha Manager", "grade": 1},
+        {"name": "Beta Customer", "manager_name": "Beta Manager", "grade": 2},
+        {"name": "Gamma Customer", "manager_name": "Gamma Manager", "grade": 3},
     ]:
         response = client.post("/customers", headers=admin_headers, json=payload)
         assert response.status_code == 201
@@ -288,6 +299,11 @@ def test_get_all_customers_returns_all_items_without_pagination(
         "Alpha Customer",
         "Beta Customer",
         "Gamma Customer",
+    ]
+    assert [item["manager_name"] for item in items] == [
+        "Alpha Manager",
+        "Beta Manager",
+        "Gamma Manager",
     ]
 
 

@@ -81,8 +81,8 @@ def create_customer(
 def list_customers(
     response: Response,
     is_active: bool | None = Query(default=None, description="Filter by active flag."),
-    search: str | None = Query(default=None, description="Search by customer name."),
-    sort_by: Literal["id", "name", "grade", "is_active", "created_at", "updated_at"] = Query(
+    search: str | None = Query(default=None, description="Search by customer name or manager name."),
+    sort_by: Literal["id", "name", "manager_name", "grade", "is_active", "created_at", "updated_at"] = Query(
         default="id",
         description="Sort field.",
     ),

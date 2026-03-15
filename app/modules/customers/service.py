@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, status
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -45,6 +45,7 @@ class CustomerQueryBuilder:
     SORT_COLUMNS = {
         "id": Customer.id,
         "name": Customer.name,
+        "manager_name": Customer.manager_name,
         "grade": Customer.grade,
         "is_active": Customer.is_active,
         "created_at": Customer.created_at,
@@ -64,7 +65,13 @@ class CustomerQueryBuilder:
         else:
             query = query.where(Customer.is_active.is_(is_active))
         if search:
-            query = query.where(Customer.name.ilike(f"%{search}%"))
+            search_pattern = f"%{search}%"
+            query = query.where(
+                or_(
+                    Customer.name.ilike(search_pattern),
+                    Customer.manager_name.ilike(search_pattern),
+                )
+            )
         sort_column = self.SORT_COLUMNS[sort_by]
         if sort_order == SortOrder.DESC:
             query = query.order_by(sort_column.desc(), Customer.id.desc())
@@ -81,6 +88,7 @@ class CustomerService:
     def create(self, dto: CustomerCreate) -> Customer:
         customer = Customer(
             name=dto.name,
+            manager_name=dto.manager_name,
             grade=dto.grade,
             is_active=True,
         )

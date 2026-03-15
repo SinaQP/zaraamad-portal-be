@@ -13,6 +13,8 @@ _CUSTOM_VALUE_ERROR_TRANSLATIONS = {
     "customer_id is required for customer users.": messages.CUSTOMER_ID_REQUIRED,
     "items must not be empty.": messages.ITEMS_MUST_NOT_BE_EMPTY,
     "Invalid Iranian mobile format.": messages.INVALID_IRANIAN_MOBILE,
+    "At least one of message or selected_options must be provided.": messages.FEEDBACK_CONTENT_REQUIRED,
+    "Each selected option must be at most 255 characters.": messages.FEEDBACK_OPTION_TOO_LONG,
     "At least one of subscription or messages must be provided.": messages.SUBSCRIPTION_CONFIG_UPDATE_REQUIRED,
     "Invalid Jalali datetime format. Use YYYY-MM-DD HH:MM:SS.": messages.INVALID_JALALI_DATETIME,
 }
