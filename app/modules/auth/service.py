@@ -144,7 +144,7 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="INVALID_CREDENTIALS", # Or USER_NOT_FOUND_OR_INACTIVE if you prefer
             )
-
+        print(user_row)
         # 3. Verify the provided password against the stored password
         # IMPORTANT: Ensure user_row['password'] contains the HASHED password.
         # You MUST use a proper password verification function.
@@ -187,6 +187,7 @@ class AuthService:
                 user_table.c.role,
                 user_table.c.customer_id,
                 user_table.c.is_active,
+                user_table.c.password,
             ).where(
                 user_table.c.mobile == mobile,
                 user_table.c.is_active.is_(True),
