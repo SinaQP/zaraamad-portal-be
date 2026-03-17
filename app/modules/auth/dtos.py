@@ -65,3 +65,7 @@ class AccessTokenBase(MongoDTO):
 
 class AccessTokenOut(AccessTokenBase):
     pass
+
+class LoginCreate(MongoDTO):
+    mobile: str = Field(..., description="User's mobile number for login.", examples=["09121234567"])
+    password: str = Field(..., description="User's password.", examples=["your_secure_password"])

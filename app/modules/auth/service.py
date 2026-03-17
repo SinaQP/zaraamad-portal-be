@@ -16,7 +16,7 @@ from app.common.messages import (
 )
 from app.common.security.jwt_service import JWTService, get_jwt_service
 from app.common.services.otp_provider import OTPProvider, OTPProviderError, get_otp_provider
-from app.modules.auth.dtos import AccessTokenOut, OtpRequestCreate, OtpRequestResult, OtpVerifyCreate
+from app.modules.auth.dtos import AccessTokenOut, LoginCreate, OtpRequestCreate, OtpRequestResult, OtpVerifyCreate
 from app.modules.auth.mappers import AuthMapper, get_auth_mapper
 from app.modules.auth.schemas import OTPCode
 
@@ -126,7 +126,57 @@ class AuthService:
             token_type="bearer",
             user=self._mapper.from_user_row(user_row=user_row),
         )
+    
+    def login(self, dto: LoginCreate) -> AccessTokenOut:
+        """
+        Authenticates a user using mobile number and password.
+        """
+        # 1. Retrieve the active user by mobile number
+        # Assuming _get_active_user_by_mobile returns a dict or ORM object
+        user_row = self._get_active_user_by_mobile(mobile=dto.mobile)
 
+        # 2. Check if user exists and is active
+        if user_row is None:
+            # It's often better practice to return a generic "invalid credentials"
+            # error for both non-existent users and incorrect passwords to avoid
+            # enumeration attacks.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="INVALID_CREDENTIALS", # Or USER_NOT_FOUND_OR_INACTIVE if you prefer
+            )
+
+        # 3. Verify the provided password against the stored password
+        # IMPORTANT: Ensure user_row['password'] contains the HASHED password.
+        # You MUST use a proper password verification function.
+        # Example using a hypothetical verify_password function:
+        # if not verify_password(plain_password=dto.password, hashed_password=user_row['password']):
+        #     raise HTTPException(
+        #         status_code=status.HTTP_401_UNAUTHORIZED,
+        #         detail=INVALID_CREDENTIALS,
+        #     )
+
+        # --- Temporary placeholder if you are not yet using password hashing ---
+        # REMOVE THIS BLOCK and uncomment the verify_password block above when hashing is implemented.
+        if user_row["password"] != dto.password: # WARNING: Plaintext password check - NOT SECURE!
+             raise HTTPException(
+                 status_code=status.HTTP_401_UNAUTHORIZED,
+                 detail="INVALID_CREDENTIALS",
+             )
+        # --- End of temporary block ---
+
+        # 4. If authentication is successful, create an access token
+        access_token = self._jwt_service.create_access_token(
+            user_id=user_row["id"],
+            mobile=user_row["mobile"],
+            role=UserRole(user_row["role"]), # Assuming UserRole is an Enum and user_row["role"] maps to it
+        )
+
+        # 5. Return the token and user details
+        return AccessTokenOut(
+            access_token=access_token,
+            token_type="bearer",
+            user=self._mapper.from_user_row(user_row=user_row), # Map user data for the response
+        )
     def _get_active_user_by_mobile(self, mobile: str):
         user_table = Base.metadata.tables["users"]
         return self._db_session.execute(
