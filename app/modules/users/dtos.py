@@ -12,6 +12,7 @@ from app.common.validators.mobile_validator import get_mobile_validator
 class UserBase(MongoDTO):
     full_name: str = Field(..., description="User full name.", examples=["Ali Rezaei"])
     mobile: str = Field(..., description="Iranian mobile number.", examples=["09121234567"])
+    password: str = Field(..., description="User password.", examples=["your_secure_password"])
     role: UserRole = Field(..., description="User role.", examples=[UserRole.CUSTOMER])
     customer_id: int | None = Field(
         default=None,

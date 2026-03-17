@@ -18,6 +18,7 @@ class User(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     mobile: Mapped[str] = mapped_column(String(20), nullable=False, unique=True, index=True)
+    password: Mapped[str] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         Enum(
             UserRole,

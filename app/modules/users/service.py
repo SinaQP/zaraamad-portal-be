@@ -110,6 +110,7 @@ class UserService:
             mobile=dto.mobile,
             role=dto.role,
             customer_id=customer_id,
+            password=dto.password,
             is_active=True,
         )
         self._db_session.add(user)
