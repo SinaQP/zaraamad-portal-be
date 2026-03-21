@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.database import Base, TimestampMixin
@@ -41,3 +41,37 @@ class CustomerBridgeConfig(Base, TimestampMixin):
     cached_subscription_status_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     last_subscription_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_subscription_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+
+class CustomerIncomeSummary(Base, TimestampMixin):
+    __tablename__ = "customer_income_summaries"
+
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    registered_income_amount_12m: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    issued_bills_count_12m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    paid_bills_count_12m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    collection_rate_percent_12m: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class CustomerIncomeBucket(Base, TimestampMixin):
+    __tablename__ = "customer_income_buckets"
+    __table_args__ = (
+        UniqueConstraint(
+            "customer_id",
+            "bucket_code",
+            name="uq_customer_income_buckets_customer_bucket_code",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    bucket_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    chart_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    registered_income_amount_12m: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

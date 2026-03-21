@@ -41,6 +41,7 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.DATA_INTEGRITY_ERROR: "A database integrity constraint was violated.",
     messages.CUSTOMER_NOT_FOUND: "Requested customer record was not found.",
     messages.CUSTOMER_ACCESS_DENIED: "Authenticated user cannot access the requested customer scope.",
+    messages.CUSTOMER_INCOME_NOT_FOUND: "Requested customer income dataset was not found.",
     messages.SERVICE_PROJECT_NOT_FOUND: "Requested service project record was not found.",
     messages.SERVICE_GROUP_NOT_FOUND: "Requested service group record was not found.",
     messages.SERVICE_NOT_FOUND: "Requested service record was not found.",

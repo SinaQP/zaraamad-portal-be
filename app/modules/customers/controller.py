@@ -2,14 +2,17 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Response, status
 
+from app.common.dtos import CurrentUser
 from app.common.enums import SortOrder
 from app.common.pagination import PaginationParams, get_pagination_params, set_pagination_headers
-from app.common.security.dependencies import require_admin
+from app.common.security.dependencies import get_current_user, require_admin
 from app.modules.customers.dtos import (
     CustomerBridgeCapabilitiesOut,
     CustomerBridgeConfigOut,
     CustomerBridgeConfigUpdate,
     CustomerBridgeHealthOut,
+    CustomerIncomeDetailOut,
+    CustomerIncomeSummaryListOut,
     CustomerBridgeSubscriptionOut,
     CustomerCreate,
     CustomerListOut,
@@ -20,9 +23,11 @@ from app.modules.customers.mappers import CustomerMapper, get_customer_mapper
 from app.modules.customers.service import (
     CustomerBridgeService,
     CustomerBridgeConfigService,
+    CustomerIncomeService,
     CustomerService,
     get_customer_bridge_service,
     get_customer_bridge_config_service,
+    get_customer_income_service,
     get_customer_service,
 )
 from app.modules.subscriptions.dtos import (
@@ -127,6 +132,51 @@ def get_all_customers(
 
 
 @router.get(
+    "/income",
+    tags=[CUSTOMERS_TAG],
+    response_model=CustomerIncomeSummaryListOut,
+    summary="List customer income summaries",
+    description="Return imported 12-month income summaries for active customers.",
+    responses={
+        200: {"description": "Customer income summary list returned."},
+        403: {"description": "Admin access required."},
+    },
+)
+def list_customer_income_summaries(
+    response: Response,
+    search: str | None = Query(default=None, description="Search by customer name."),
+    sort_by: Literal[
+        "customer_name",
+        "registered_income_amount_12m",
+        "issued_bills_count_12m",
+        "paid_bills_count_12m",
+        "collection_rate_percent_12m",
+        "created_at",
+        "updated_at",
+    ] = Query(default="customer_name", description="Sort field."),
+    sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
+    pagination: PaginationParams = Depends(get_pagination_params),
+    _: object = Depends(require_admin),
+    service: CustomerIncomeService = Depends(get_customer_income_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerIncomeSummaryListOut:
+    rows, meta = service.list_summaries(
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        pagination=pagination,
+    )
+    set_pagination_headers(response=response, meta=meta)
+    return CustomerIncomeSummaryListOut(
+        items=[
+            mapper.to_income_summary_out(customer=customer, income_summary=income_summary)
+            for customer, income_summary in rows
+        ],
+        total_page=meta.total_pages,
+    )
+
+
+@router.get(
     "/{customer_id}",
     tags=[CUSTOMERS_TAG],
     response_model=CustomerOut,
@@ -146,6 +196,36 @@ def get_customer(
 ) -> CustomerOut:
     customer = service.get_active_or_404(customer_id=customer_id)
     return mapper.to_out(customer=customer)
+
+
+@router.get(
+    "/{customer_id}/income",
+    tags=[CUSTOMERS_TAG],
+    response_model=CustomerIncomeDetailOut,
+    summary="Get customer income detail",
+    description="Return imported customer income summary data together with the stored bucket breakdown.",
+    responses={
+        200: {"description": "Customer income detail returned."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        404: {"description": "Customer or customer income data not found."},
+    },
+)
+def get_customer_income_detail(
+    customer_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerIncomeService = Depends(get_customer_income_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerIncomeDetailOut:
+    customer, income_summary, buckets = service.get_detail(
+        customer_id=customer_id,
+        current_user=current_user,
+    )
+    return mapper.to_income_detail_out(
+        customer=customer,
+        income_summary=income_summary,
+        buckets=buckets,
+    )
 
 
 @router.patch(

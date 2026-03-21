@@ -50,6 +50,83 @@ class CustomerListOut(PaginatedResponse[CustomerOut]):
     pass
 
 
+class CustomerIncomeSummaryBase(MongoDTO):
+    registered_income_amount_12m: int | None = Field(
+        default=None,
+        description="Registered income amount over the last 12 months.",
+        examples=[1250000000],
+    )
+    issued_bills_count_12m: int | None = Field(
+        default=None,
+        description="Issued bills count over the last 12 months.",
+        examples=[3200],
+    )
+    paid_bills_count_12m: int | None = Field(
+        default=None,
+        description="Paid bills count over the last 12 months.",
+        examples=[2800],
+    )
+    collection_rate_percent_12m: float | None = Field(
+        default=None,
+        description="Collection rate percentage over the last 12 months.",
+        examples=[87.5],
+    )
+
+
+class CustomerIncomeSummaryOut(CustomerIncomeSummaryBase):
+    customer_id: int = Field(..., description="Customer id.", examples=[1])
+    customer_name: str = Field(..., description="Customer name.", examples=["شهرداری تهران"])
+    created_at: datetime = Field(..., description="Creation timestamp.")
+    updated_at: datetime = Field(..., description="Last update timestamp.")
+
+
+class CustomerIncomeSummaryListOut(PaginatedResponse[CustomerIncomeSummaryOut]):
+    pass
+
+
+class CustomerIncomeBucketBase(MongoDTO):
+    bucket_code: str = Field(..., description="Stable income bucket code.", examples=["110400"])
+    chart_label: str | None = Field(
+        default=None,
+        description="Display label for the income bucket.",
+        examples=["عوارض ساختمانی"],
+    )
+    registered_income_amount_12m: int | None = Field(
+        default=None,
+        description="Registered income amount for this bucket over the last 12 months.",
+        examples=[420000000],
+    )
+
+
+class CustomerIncomeBucketOut(CustomerIncomeBucketBase):
+    pass
+
+
+class CustomerIncomeCustomerOut(MongoDTO):
+    id: int = Field(..., description="Customer id.", examples=[1])
+    name: str = Field(..., description="Customer name.", examples=["شهرداری تهران"])
+    manager_name: str | None = Field(
+        default=None,
+        description="Customer manager or contract signatory name.",
+        examples=["Ali Rezaei"],
+    )
+    grade: int = Field(..., description="Customer grade.", examples=[1])
+
+
+class CustomerIncomeDetailSummaryOut(CustomerIncomeSummaryBase):
+    created_at: datetime = Field(..., description="Creation timestamp.")
+    updated_at: datetime = Field(..., description="Last update timestamp.")
+
+
+class CustomerIncomeDetailOut(MongoDTO):
+    customer: CustomerIncomeCustomerOut = Field(..., description="Customer information.")
+    summary: CustomerIncomeDetailSummaryOut = Field(..., description="Income summary for the customer.")
+    buckets: list[CustomerIncomeBucketOut] = Field(
+        ...,
+        description="Income bucket breakdown for the customer.",
+    )
+
+
 class CustomerUpdate(MongoDTO):
     name: str | None = Field(default=None, description="Customer name.", examples=["Qom Customer"])
     manager_name: str | None = Field(

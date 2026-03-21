@@ -2,7 +2,7 @@
 
 Backend API for Zaraamad Portal Phase 1.
 
-Current release: `0.9.0`
+Current release: `0.10.0`
 
 ## Overview
 
@@ -11,6 +11,7 @@ This backend currently provides:
 - OTP-based login
 - JWT access authentication
 - Customer management
+- Customer income summary and bucket import
 - User management
 - Service project, group, and catalog management
 - Customer-specific service pricing and pricing summary
@@ -226,7 +227,9 @@ Customers:
 
 - `POST /customers`
 - `GET /customers`
+- `GET /customers/income`
 - `GET /customers/{customer_id}`
+- `GET /customers/{customer_id}/income`
 - `PATCH /customers/{customer_id}`
 - `DELETE /customers/{customer_id}`
 
@@ -429,4 +432,12 @@ curl -X PUT http://localhost:8000/customers/1/services \
 
 ```bash
 pytest
+```
+
+## Manual Commands
+
+Export query results from multiple SQL Server instances into Excel:
+
+```bash
+python -m app.commands.export_db_results --input ./servers.xlsx --query-file ./query.sql --output ./db_results.xlsx
 ```

@@ -4,10 +4,20 @@ from app.modules.customers.dtos import (
     CustomerBridgeCapabilityBase,
     CustomerBridgeConfigOut,
     CustomerBridgeHealthOut,
+    CustomerIncomeBucketOut,
+    CustomerIncomeCustomerOut,
+    CustomerIncomeDetailOut,
+    CustomerIncomeDetailSummaryOut,
+    CustomerIncomeSummaryOut,
     CustomerBridgeSubscriptionOut,
     CustomerOut,
 )
-from app.modules.customers.schemas import Customer, CustomerBridgeConfig
+from app.modules.customers.schemas import (
+    Customer,
+    CustomerBridgeConfig,
+    CustomerIncomeBucket,
+    CustomerIncomeSummary,
+)
 
 
 class CustomerMapper:
@@ -91,6 +101,56 @@ class CustomerMapper:
             status_message=bridge_config.cached_subscription_status_message if bridge_config and bridge_config.cached_subscription_status_message is not None else "",
             last_subscription_synced_at=bridge_config.last_subscription_synced_at if bridge_config else None,
             last_subscription_error=bridge_config.last_subscription_error if bridge_config else None,
+        )
+
+    def to_income_summary_out(
+        self,
+        customer: Customer,
+        income_summary: CustomerIncomeSummary,
+    ) -> CustomerIncomeSummaryOut:
+        return CustomerIncomeSummaryOut(
+            customer_id=customer.id,
+            customer_name=customer.name,
+            registered_income_amount_12m=income_summary.registered_income_amount_12m,
+            issued_bills_count_12m=income_summary.issued_bills_count_12m,
+            paid_bills_count_12m=income_summary.paid_bills_count_12m,
+            collection_rate_percent_12m=income_summary.collection_rate_percent_12m,
+            created_at=income_summary.created_at,
+            updated_at=income_summary.updated_at,
+        )
+
+    def to_income_bucket_out(
+        self,
+        bucket: CustomerIncomeBucket,
+    ) -> CustomerIncomeBucketOut:
+        return CustomerIncomeBucketOut(
+            bucket_code=bucket.bucket_code,
+            chart_label=bucket.chart_label,
+            registered_income_amount_12m=bucket.registered_income_amount_12m,
+        )
+
+    def to_income_detail_out(
+        self,
+        customer: Customer,
+        income_summary: CustomerIncomeSummary,
+        buckets: list[CustomerIncomeBucket],
+    ) -> CustomerIncomeDetailOut:
+        return CustomerIncomeDetailOut(
+            customer=CustomerIncomeCustomerOut(
+                id=customer.id,
+                name=customer.name,
+                manager_name=customer.manager_name,
+                grade=customer.grade,
+            ),
+            summary=CustomerIncomeDetailSummaryOut(
+                registered_income_amount_12m=income_summary.registered_income_amount_12m,
+                issued_bills_count_12m=income_summary.issued_bills_count_12m,
+                paid_bills_count_12m=income_summary.paid_bills_count_12m,
+                collection_rate_percent_12m=income_summary.collection_rate_percent_12m,
+                created_at=income_summary.created_at,
+                updated_at=income_summary.updated_at,
+            ),
+            buckets=[self.to_income_bucket_out(bucket=item) for item in buckets],
         )
 
 
