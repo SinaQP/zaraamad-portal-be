@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
 from app.common.messages import (
+    INVALID_CREDENTIALS,
     INVALID_IRANIAN_MOBILE,
     OTP_DELIVERY_FAILED,
     OTP_INVALID,
@@ -27,6 +28,21 @@ def _create_admin(db_session: Session) -> User:
     db_session.commit()
     db_session.refresh(admin)
     return admin
+
+
+def _create_customer(db_session: Session) -> User:
+    customer = User(
+        full_name="Password User",
+        mobile="09123334455",
+        role=UserRole.ADMIN,
+        customer_id=None,
+        is_active=True,
+        password="legacy-password",
+    )
+    db_session.add(customer)
+    db_session.commit()
+    db_session.refresh(customer)
+    return customer
 
 
 class FailingOTPProvider(OTPProvider):
@@ -131,4 +147,38 @@ def test_invalid_mobile_returns_persian_validation_message(client: TestClient) -
     assert response.json()["developer_message"] == "Request validation failed."
     assert response.json()["detail"][0]["msg"] == INVALID_IRANIAN_MOBILE
     assert "body.mobile" in response.json()["detail"][0]["developer_message"]
+
+
+def test_password_login_upgrades_legacy_plaintext_password(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _create_customer(db_session=db_session)
+
+    response = client.post(
+        "/auth/login",
+        json={"mobile": user.mobile, "password": "legacy-password"},
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(user)
+    assert user.password is not None
+    assert user.password != "legacy-password"
+    assert user.password.startswith("pbkdf2_sha256$")
+
+
+def test_password_login_rejects_invalid_password(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    user = _create_customer(db_session=db_session)
+
+    response = client.post(
+        "/auth/login",
+        json={"mobile": user.mobile, "password": "wrong-password"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["message"] == INVALID_CREDENTIALS
+    assert response.json()["detail"] == INVALID_CREDENTIALS
 

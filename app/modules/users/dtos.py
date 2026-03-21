@@ -9,10 +9,9 @@ from app.common.pagination import PaginatedResponse
 from app.common.validators.mobile_validator import get_mobile_validator
 
 
-class UserBase(MongoDTO):
+class UserPayloadBase(MongoDTO):
     full_name: str = Field(..., description="User full name.", examples=["Ali Rezaei"])
     mobile: str = Field(..., description="Iranian mobile number.", examples=["09121234567"])
-    password: str | None = Field(..., description="User password.", examples=["your_secure_password"])
     role: UserRole = Field(..., description="User role.", examples=[UserRole.CUSTOMER])
     customer_id: int | None = Field(
         default=None,
@@ -26,7 +25,7 @@ class UserBase(MongoDTO):
         return get_mobile_validator().normalize(value)
 
     @model_validator(mode="after")
-    def validate_role_constraints(self) -> "UserBase":
+    def validate_role_constraints(self) -> "UserPayloadBase":
         if self.role == UserRole.CUSTOMER and self.customer_id is None:
             raise ValueError(CUSTOMER_ID_REQUIRED)
         if self.role == UserRole.ADMIN:
@@ -34,11 +33,18 @@ class UserBase(MongoDTO):
         return self
 
 
-class UserCreate(UserBase):
-    pass
+class UserCreate(UserPayloadBase):
+    password: str | None = Field(default=None, description="User password.", examples=["your_secure_password"])
+
+    @field_validator("password")
+    @classmethod
+    def normalize_password(cls, value: str | None) -> str | None:
+        if value == "":
+            return None
+        return value
 
 
-class UserOut(WithId, UserBase):
+class UserOut(WithId, UserPayloadBase):
     is_active: bool = Field(..., description="User active status.", examples=[True])
     created_at: datetime = Field(..., description="Creation timestamp.")
     updated_at: datetime = Field(..., description="Last update timestamp.")
@@ -66,3 +72,10 @@ class UserUpdate(MongoDTO):
         if value is None:
             return None
         return get_mobile_validator().normalize(value)
+
+    @field_validator("password")
+    @classmethod
+    def normalize_password(cls, value: str | None) -> str | None:
+        if value == "":
+            return None
+        return value

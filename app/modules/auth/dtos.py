@@ -69,3 +69,8 @@ class AccessTokenOut(AccessTokenBase):
 class LoginCreate(MongoDTO):
     mobile: str = Field(..., description="User's mobile number for login.", examples=["09121234567"])
     password: str = Field(..., description="User's password.", examples=["your_secure_password"])
+
+    @field_validator("mobile")
+    @classmethod
+    def normalize_mobile(cls, value: str) -> str:
+        return get_mobile_validator().normalize(value)

@@ -2,7 +2,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
-from app.common.messages import ADMIN_ACCESS_REQUIRED, CUSTOMER_ID_REQUIRED, VALIDATION_ERROR_MESSAGE
+from app.common.messages import (
+    ADMIN_ACCESS_REQUIRED,
+    CUSTOMER_ID_REQUIRED,
+    INVALID_CREDENTIALS,
+    VALIDATION_ERROR_MESSAGE,
+)
 from app.modules.customers.schemas import Customer
 from app.modules.users.schemas import User
 
@@ -413,3 +418,87 @@ def test_inactive_users_and_customers_are_hidden_from_get_apis(
 
     customer_bridge_response = client.get(f"/customers/{customer_id}/bridge", headers=admin_headers)
     assert customer_bridge_response.status_code == 404
+
+
+def test_admin_can_update_user_password_and_user_can_login_with_new_password(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin = _create_admin(db_session=db_session)
+    admin_token = _login(client=client, mobile=admin.mobile)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    create_response = client.post(
+        "/users",
+        headers=admin_headers,
+        json={
+            "full_name": "Second Admin",
+            "mobile": "09128889900",
+            "role": UserRole.ADMIN.value,
+            "password": "initial-password",
+        },
+    )
+    assert create_response.status_code == 201
+    user_id = create_response.json()["id"]
+
+    initial_login = client.post(
+        "/auth/login",
+        json={"mobile": "09128889900", "password": "initial-password"},
+    )
+    assert initial_login.status_code == 200
+
+    update_response = client.patch(
+        f"/users/{user_id}",
+        headers=admin_headers,
+        json={"password": "new-password"},
+    )
+    assert update_response.status_code == 200
+
+    old_password_response = client.post(
+        "/auth/login",
+        json={"mobile": "09128889900", "password": "initial-password"},
+    )
+    assert old_password_response.status_code == 401
+    assert old_password_response.json()["message"] == INVALID_CREDENTIALS
+
+    new_password_response = client.post(
+        "/auth/login",
+        json={"mobile": "09128889900", "password": "new-password"},
+    )
+    assert new_password_response.status_code == 200
+
+
+def test_empty_password_in_patch_does_not_clear_existing_user_password(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin = _create_admin(db_session=db_session)
+    admin_token = _login(client=client, mobile=admin.mobile)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    create_response = client.post(
+        "/users",
+        headers=admin_headers,
+        json={
+            "full_name": "Password User",
+            "mobile": "09128889901",
+            "role": UserRole.ADMIN.value,
+            "password": "stable-password",
+        },
+    )
+    assert create_response.status_code == 201
+    user_id = create_response.json()["id"]
+
+    update_response = client.patch(
+        f"/users/{user_id}",
+        headers=admin_headers,
+        json={"full_name": "Password User Updated", "password": ""},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["full_name"] == "Password User Updated"
+
+    login_response = client.post(
+        "/auth/login",
+        json={"mobile": "09128889901", "password": "stable-password"},
+    )
+    assert login_response.status_code == 200

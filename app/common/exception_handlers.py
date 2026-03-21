@@ -32,6 +32,7 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.USER_NOT_FOUND: "Requested user record was not found.",
     messages.USER_INACTIVE: "Requested user is inactive.",
     messages.USER_NOT_FOUND_OR_INACTIVE: "Active user record for the provided identifier was not found.",
+    messages.INVALID_CREDENTIALS: "Mobile/password combination did not match an active user.",
     messages.MOBILE_ALREADY_EXISTS: "Unique constraint on user mobile was violated.",
     messages.OTP_DELIVERY_FAILED: "OTP delivery provider failed.",
     messages.OTP_INVALID: "Provided OTP code is invalid or already consumed.",

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.common.database import Base, get_db_session
 from app.common.enums import SortOrder, UserRole
+from app.common.security.password_service import PasswordService, get_password_service
 from app.common.messages import (
     CUSTOMER_ID_REQUIRED,
     DATA_INTEGRITY_ERROR,
@@ -95,8 +96,9 @@ class UserRolePolicy:
 
 
 class UserService:
-    def __init__(self, db_session: Session) -> None:
+    def __init__(self, db_session: Session, password_service: PasswordService) -> None:
         self._db_session = db_session
+        self._password_service = password_service
         self._query_builder = UserQueryBuilder()
         self._role_policy = UserRolePolicy(db_session=db_session)
 
@@ -110,7 +112,7 @@ class UserService:
             mobile=dto.mobile,
             role=dto.role,
             customer_id=customer_id,
-            password=dto.password,
+            password=self._hash_password(dto.password),
             is_active=True,
         )
         self._db_session.add(user)
@@ -175,6 +177,7 @@ class UserService:
     def update(self, user_id: int, dto: UserUpdate) -> User:
         user = self.get_or_404(user_id=user_id)
         update_data = dto.model_dump(exclude_unset=True)
+        password = self._extract_password_update(update_data)
         target_role = update_data.get("role", user.role)
         raw_customer_id = (
             update_data["customer_id"]
@@ -186,11 +189,13 @@ class UserService:
             customer_id=raw_customer_id,
         )
         for field_name, field_value in update_data.items():
-            if field_name == "customer_id":
+            if field_name in {"customer_id", "password"}:
                 continue
             setattr(user, field_name, field_value)
         user.role = target_role
         user.customer_id = customer_id
+        if password is not None:
+            user.password = password
         try:
             self._db_session.commit()
         except IntegrityError as exc:
@@ -218,6 +223,20 @@ class UserService:
             detail=DATA_INTEGRITY_ERROR,
         )
 
+    def _hash_password(self, password: str | None) -> str | None:
+        if not password:
+            return None
+        return self._password_service.hash_password(password=password)
 
-def get_user_service(db_session: Session = Depends(get_db_session)) -> UserService:
-    return UserService(db_session=db_session)
+    def _extract_password_update(self, update_data: dict[str, object]) -> str | None:
+        password = update_data.get("password")
+        if not password:
+            return None
+        return self._password_service.hash_password(password=str(password))
+
+
+def get_user_service(
+    db_session: Session = Depends(get_db_session),
+    password_service: PasswordService = Depends(get_password_service),
+) -> UserService:
+    return UserService(db_session=db_session, password_service=password_service)

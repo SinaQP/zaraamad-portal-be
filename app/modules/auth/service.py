@@ -9,12 +9,14 @@ from app.common.config import Settings, get_settings
 from app.common.database import Base, get_db_session
 from app.common.enums import OtpPurpose, UserRole
 from app.common.messages import (
+    INVALID_CREDENTIALS,
     OTP_EXPIRED,
     OTP_INVALID,
     TOO_MANY_OTP_REQUESTS,
     USER_NOT_FOUND_OR_INACTIVE,
 )
 from app.common.security.jwt_service import JWTService, get_jwt_service
+from app.common.security.password_service import PasswordService, get_password_service
 from app.common.services.otp_provider import OTPProvider, OTPProviderError, get_otp_provider
 from app.modules.auth.dtos import AccessTokenOut, LoginCreate, OtpRequestCreate, OtpRequestResult, OtpVerifyCreate
 from app.modules.auth.mappers import AuthMapper, get_auth_mapper
@@ -44,12 +46,14 @@ class AuthService:
         db_session: Session,
         settings: Settings,
         jwt_service: JWTService,
+        password_service: PasswordService,
         otp_provider: OTPProvider,
         mapper: AuthMapper,
     ) -> None:
         self._db_session = db_session
         self._settings = settings
         self._jwt_service = jwt_service
+        self._password_service = password_service
         self._otp_provider = otp_provider
         self._mapper = mapper
         self._otp_policy = OTPPolicy(settings=settings)
@@ -128,55 +132,33 @@ class AuthService:
         )
     
     def login(self, dto: LoginCreate) -> AccessTokenOut:
-        """
-        Authenticates a user using mobile number and password.
-        """
-        # 1. Retrieve the active user by mobile number
-        # Assuming _get_active_user_by_mobile returns a dict or ORM object
         user_row = self._get_active_user_by_mobile(mobile=dto.mobile)
-
-        # 2. Check if user exists and is active
         if user_row is None:
-            # It's often better practice to return a generic "invalid credentials"
-            # error for both non-existent users and incorrect passwords to avoid
-            # enumeration attacks.
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="INVALID_CREDENTIALS", # Or USER_NOT_FOUND_OR_INACTIVE if you prefer
+                detail=INVALID_CREDENTIALS,
             )
-        print(user_row)
-        # 3. Verify the provided password against the stored password
-        # IMPORTANT: Ensure user_row['password'] contains the HASHED password.
-        # You MUST use a proper password verification function.
-        # Example using a hypothetical verify_password function:
-        # if not verify_password(plain_password=dto.password, hashed_password=user_row['password']):
-        #     raise HTTPException(
-        #         status_code=status.HTTP_401_UNAUTHORIZED,
-        #         detail=INVALID_CREDENTIALS,
-        #     )
-
-        # --- Temporary placeholder if you are not yet using password hashing ---
-        # REMOVE THIS BLOCK and uncomment the verify_password block above when hashing is implemented.
-        if user_row["password"] != dto.password: # WARNING: Plaintext password check - NOT SECURE!
-             raise HTTPException(
-                 status_code=status.HTTP_401_UNAUTHORIZED,
-                 detail="INVALID_CREDENTIALS",
-             )
-        # --- End of temporary block ---
-
-        # 4. If authentication is successful, create an access token
+        if not self._password_service.verify_password(
+            password=dto.password,
+            stored_password=user_row["password"],
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=INVALID_CREDENTIALS,
+            )
+        if self._password_service.is_legacy_plaintext_password(user_row["password"]):
+            self._upgrade_legacy_password(user_id=user_row["id"], password=dto.password)
         access_token = self._jwt_service.create_access_token(
             user_id=user_row["id"],
             mobile=user_row["mobile"],
-            role=UserRole(user_row["role"]), # Assuming UserRole is an Enum and user_row["role"] maps to it
+            role=UserRole(user_row["role"]),
         )
-
-        # 5. Return the token and user details
         return AccessTokenOut(
             access_token=access_token,
             token_type="bearer",
-            user=self._mapper.from_user_row(user_row=user_row), # Map user data for the response
+            user=self._mapper.from_user_row(user_row=user_row),
         )
+
     def _get_active_user_by_mobile(self, mobile: str):
         user_table = Base.metadata.tables["users"]
         return self._db_session.execute(
@@ -193,6 +175,15 @@ class AuthService:
                 user_table.c.is_active.is_(True),
             )
         ).mappings().first()
+
+    def _upgrade_legacy_password(self, user_id: int, password: str) -> None:
+        user_table = Base.metadata.tables["users"]
+        self._db_session.execute(
+            update(user_table)
+            .where(user_table.c.id == user_id)
+            .values(password=self._password_service.hash_password(password=password))
+        )
+        self._db_session.commit()
 
     def _enforce_rate_limit(self, mobile: str) -> None:
         threshold = datetime.now(UTC) - self._otp_policy.request_limit_window
@@ -244,6 +235,7 @@ def get_auth_service(
     db_session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
     jwt_service: JWTService = Depends(get_jwt_service),
+    password_service: PasswordService = Depends(get_password_service),
     otp_provider: OTPProvider = Depends(get_otp_provider),
     mapper: AuthMapper = Depends(get_auth_mapper),
 ) -> AuthService:
@@ -251,6 +243,7 @@ def get_auth_service(
         db_session=db_session,
         settings=settings,
         jwt_service=jwt_service,
+        password_service=password_service,
         otp_provider=otp_provider,
         mapper=mapper,
     )
