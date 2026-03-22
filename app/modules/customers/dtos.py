@@ -1,12 +1,15 @@
 from typing import Self
 
 from datetime import datetime
+import re
 
 from pydantic import Field, field_validator, model_validator
 
 from app.common.dtos import MongoDTO, WithId
 from app.common.messages import ITEMS_MUST_NOT_BE_EMPTY
 from app.common.pagination import PaginatedResponse
+
+CUSTOMER_INCOME_MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
 class CustomerBridgeConfigNormalizer(MongoDTO):
@@ -111,6 +114,25 @@ class CustomerIncomeBucketOut(CustomerIncomeBucketBase):
     pass
 
 
+class CustomerIncomeMonthlyReportBase(CustomerIncomeMetricsBase):
+    month: str = Field(
+        ...,
+        description="Report month in YYYY-MM format.",
+        examples=["2025-04"],
+    )
+
+    @field_validator("month")
+    @classmethod
+    def validate_month(cls, value: str) -> str:
+        if not CUSTOMER_INCOME_MONTH_PATTERN.fullmatch(value):
+            raise ValueError("Invalid customer income report month format. Use YYYY-MM.")
+        return value
+
+
+class CustomerIncomeMonthlyReportOut(CustomerIncomeMonthlyReportBase):
+    pass
+
+
 class CustomerIncomeCustomerOut(MongoDTO):
     id: int = Field(..., description="Customer id.", examples=[1])
     name: str = Field(..., description="Customer name.", examples=["Tehran Customer"])
@@ -129,6 +151,10 @@ class CustomerIncomeDetailOut(MongoDTO):
         ...,
         description="Income bucket breakdown for the customer.",
     )
+    monthly_reports: list[CustomerIncomeMonthlyReportOut] = Field(
+        ...,
+        description="Monthly income report history for the customer.",
+    )
 
 
 class CustomerIncomeSummaryCreate(CustomerIncomeMetricsBase):
@@ -139,12 +165,20 @@ class CustomerIncomeBucketCreate(CustomerIncomeBucketBase):
     pass
 
 
+class CustomerIncomeMonthlyReportCreate(CustomerIncomeMonthlyReportBase):
+    pass
+
+
 class CustomerIncomeBulkUpsertItemBase(MongoDTO):
     customer_id: int = Field(..., description="Customer id.", examples=[1])
     summary: CustomerIncomeSummaryCreate = Field(..., description="Income summary for the customer.")
     buckets: list[CustomerIncomeBucketCreate] = Field(
         ...,
         description="Income bucket breakdown for the customer.",
+    )
+    monthly_reports: list[CustomerIncomeMonthlyReportCreate] | None = Field(
+        default=None,
+        description="Optional monthly income report history for the customer.",
     )
 
 

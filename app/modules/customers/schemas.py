@@ -75,3 +75,26 @@ class CustomerIncomeBucket(Base, TimestampMixin):
     bucket_code: Mapped[str] = mapped_column(String(50), nullable=False)
     bucket_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     registered_income_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class CustomerIncomeMonthlyReport(Base, TimestampMixin):
+    __tablename__ = "customer_income_monthly_reports"
+    __table_args__ = (
+        UniqueConstraint(
+            "customer_id",
+            "month",
+            name="uq_customer_income_monthly_reports_customer_month",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    registered_income_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    issued_bill_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    paid_bill_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    collection_rate_percent: Mapped[float | None] = mapped_column(Float, nullable=True)

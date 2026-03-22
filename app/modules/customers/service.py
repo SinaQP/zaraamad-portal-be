@@ -31,6 +31,7 @@ from app.common.messages import (
     DATA_INTEGRITY_ERROR,
     DUPLICATE_CUSTOMER_INCOME_BUCKET_CODE,
     DUPLICATE_CUSTOMER_INCOME_CUSTOMER,
+    DUPLICATE_CUSTOMER_INCOME_REPORT_MONTH,
 )
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.common.services.bridge_client import (
@@ -58,6 +59,7 @@ from app.modules.customers.schemas import (
     Customer,
     CustomerBridgeConfig,
     CustomerIncomeBucket,
+    CustomerIncomeMonthlyReport,
     CustomerIncomeSummary,
 )
 
@@ -445,6 +447,7 @@ class CustomerIncomeMutationPolicy:
         self._validate_unique_customer_ids(items=items)
         for item in items:
             self._validate_unique_bucket_codes(item=item)
+            self._validate_unique_report_months(item=item)
             self._validate_bucket_total(item=item)
 
     def get_active_customer_map(
@@ -512,6 +515,20 @@ class CustomerIncomeMutationPolicy:
                 detail=CUSTOMER_INCOME_BUCKET_TOTAL_MISMATCH,
             )
 
+    def _validate_unique_report_months(
+        self,
+        *,
+        item: CustomerIncomeBulkUpsertItemCreate,
+    ) -> None:
+        if item.monthly_reports is None:
+            return
+        report_months = [report.month for report in item.monthly_reports]
+        if len(report_months) != len(set(report_months)):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=DUPLICATE_CUSTOMER_INCOME_REPORT_MONTH,
+            )
+
 
 class CustomerIncomeService:
     def __init__(
@@ -557,7 +574,12 @@ class CustomerIncomeService:
         *,
         customer_id: int,
         current_user: CurrentUser,
-    ) -> tuple[Customer, CustomerIncomeSummary, list[CustomerIncomeBucket]]:
+    ) -> tuple[
+        Customer,
+        CustomerIncomeSummary,
+        list[CustomerIncomeBucket],
+        list[CustomerIncomeMonthlyReport],
+    ]:
         customer = self._customer_service.get_active_or_404(customer_id=customer_id)
         self._access_policy.validate_customer_access(
             current_user=current_user,
@@ -578,23 +600,51 @@ class CustomerIncomeService:
             )
         )
         buckets = list(self._db_session.scalars(bucket_query).all())
-        return customer, income_summary, buckets
+        monthly_reports = list(
+            self._db_session.scalars(
+                select(CustomerIncomeMonthlyReport)
+                .where(CustomerIncomeMonthlyReport.customer_id == customer.id)
+                .order_by(
+                    CustomerIncomeMonthlyReport.month.asc(),
+                    CustomerIncomeMonthlyReport.id.asc(),
+                )
+            ).all()
+        )
+        return customer, income_summary, buckets, monthly_reports
 
     def bulk_upsert(
         self,
         *,
         dto: CustomerIncomeBulkUpsertCreate,
-    ) -> list[tuple[Customer, CustomerIncomeSummary, list[CustomerIncomeBucket]]]:
+    ) -> list[
+        tuple[
+            Customer,
+            CustomerIncomeSummary,
+            list[CustomerIncomeBucket],
+            list[CustomerIncomeMonthlyReport],
+        ]
+    ]:
         self._mutation_policy.validate_payload(items=dto.items)
         customer_ids = [item.customer_id for item in dto.items]
         customer_map = self._mutation_policy.get_active_customer_map(customer_ids=customer_ids)
         summary_map = self._get_income_summary_map(customer_ids=customer_ids)
+        monthly_report_customer_ids = [
+            item.customer_id
+            for item in dto.items
+            if item.monthly_reports is not None
+        ]
 
         self._db_session.execute(
             delete(CustomerIncomeBucket).where(
                 CustomerIncomeBucket.customer_id.in_(customer_ids)
             )
         )
+        if monthly_report_customer_ids:
+            self._db_session.execute(
+                delete(CustomerIncomeMonthlyReport).where(
+                    CustomerIncomeMonthlyReport.customer_id.in_(monthly_report_customer_ids)
+                )
+            )
 
         for item in dto.items:
             income_summary = summary_map.get(item.customer_id)
@@ -618,17 +668,32 @@ class CustomerIncomeService:
                     )
                 )
 
+            if item.monthly_reports is not None:
+                for monthly_report in item.monthly_reports:
+                    self._db_session.add(
+                        CustomerIncomeMonthlyReport(
+                            customer_id=item.customer_id,
+                            month=monthly_report.month,
+                            registered_income_amount=monthly_report.registered_income_amount,
+                            issued_bill_count=monthly_report.issued_bill_count,
+                            paid_bill_count=monthly_report.paid_bill_count,
+                            collection_rate_percent=monthly_report.collection_rate_percent,
+                        )
+                    )
+
         self._commit_with_integrity_guard()
 
         for customer_id in customer_ids:
             self._db_session.refresh(summary_map[customer_id])
 
         bucket_map = self._get_bucket_map(customer_ids=customer_ids)
+        monthly_report_map = self._get_monthly_report_map(customer_ids=customer_ids)
         return [
             (
                 customer_map[item.customer_id],
                 summary_map[item.customer_id],
                 bucket_map.get(item.customer_id, []),
+                monthly_report_map.get(item.customer_id, []),
             )
             for item in dto.items
         ]
@@ -667,6 +732,27 @@ class CustomerIncomeService:
         for bucket in buckets:
             bucket_map.setdefault(bucket.customer_id, []).append(bucket)
         return bucket_map
+
+    def _get_monthly_report_map(
+        self,
+        *,
+        customer_ids: list[int],
+    ) -> dict[int, list[CustomerIncomeMonthlyReport]]:
+        monthly_reports = list(
+            self._db_session.scalars(
+                select(CustomerIncomeMonthlyReport)
+                .where(CustomerIncomeMonthlyReport.customer_id.in_(customer_ids))
+                .order_by(
+                    CustomerIncomeMonthlyReport.customer_id.asc(),
+                    CustomerIncomeMonthlyReport.month.asc(),
+                    CustomerIncomeMonthlyReport.id.asc(),
+                )
+            ).all()
+        )
+        monthly_report_map: dict[int, list[CustomerIncomeMonthlyReport]] = {}
+        for monthly_report in monthly_reports:
+            monthly_report_map.setdefault(monthly_report.customer_id, []).append(monthly_report)
+        return monthly_report_map
 
     def _commit_with_integrity_guard(self) -> None:
         try:

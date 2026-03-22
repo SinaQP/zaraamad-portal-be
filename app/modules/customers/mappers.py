@@ -10,6 +10,7 @@ from app.modules.customers.dtos import (
     CustomerIncomeDetailOut,
     CustomerIncomeListCustomerOut,
     CustomerIncomeListItemOut,
+    CustomerIncomeMonthlyReportOut,
     CustomerIncomeSummaryOut,
     CustomerOut,
 )
@@ -17,6 +18,7 @@ from app.modules.customers.schemas import (
     Customer,
     CustomerBridgeConfig,
     CustomerIncomeBucket,
+    CustomerIncomeMonthlyReport,
     CustomerIncomeSummary,
 )
 
@@ -140,11 +142,24 @@ class CustomerMapper:
             registered_income_amount=bucket.registered_income_amount,
         )
 
+    def to_income_monthly_report_out(
+        self,
+        monthly_report: CustomerIncomeMonthlyReport,
+    ) -> CustomerIncomeMonthlyReportOut:
+        return CustomerIncomeMonthlyReportOut(
+            month=monthly_report.month,
+            registered_income_amount=monthly_report.registered_income_amount,
+            issued_bill_count=monthly_report.issued_bill_count,
+            paid_bill_count=monthly_report.paid_bill_count,
+            collection_rate_percent=monthly_report.collection_rate_percent,
+        )
+
     def to_income_detail_out(
         self,
         customer: Customer,
         income_summary: CustomerIncomeSummary,
         buckets: list[CustomerIncomeBucket],
+        monthly_reports: list[CustomerIncomeMonthlyReport],
     ) -> CustomerIncomeDetailOut:
         return CustomerIncomeDetailOut(
             customer=CustomerIncomeCustomerOut(
@@ -155,6 +170,10 @@ class CustomerMapper:
             ),
             summary=self.to_income_summary_out(income_summary=income_summary),
             buckets=[self.to_income_bucket_out(bucket=item) for item in buckets],
+            monthly_reports=[
+                self.to_income_monthly_report_out(monthly_report=item)
+                for item in monthly_reports
+            ],
         )
 
 

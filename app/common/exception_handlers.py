@@ -13,6 +13,7 @@ _CUSTOM_VALUE_ERROR_TRANSLATIONS = {
     "customer_id is required for customer users.": messages.CUSTOMER_ID_REQUIRED,
     "items must not be empty.": messages.ITEMS_MUST_NOT_BE_EMPTY,
     "Invalid Iranian mobile format.": messages.INVALID_IRANIAN_MOBILE,
+    "Invalid customer income report month format. Use YYYY-MM.": messages.INVALID_CUSTOMER_INCOME_REPORT_MONTH,
     "At least one of message or selected_options must be provided.": messages.FEEDBACK_CONTENT_REQUIRED,
     "Each selected option must be at most 255 characters.": messages.FEEDBACK_OPTION_TOO_LONG,
     "At least one of subscription or messages must be provided.": messages.SUBSCRIPTION_CONFIG_UPDATE_REQUIRED,
@@ -46,8 +47,14 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.DUPLICATE_CUSTOMER_INCOME_BUCKET_CODE: (
         "At least one customer income item contains duplicate bucket_code values."
     ),
+    messages.DUPLICATE_CUSTOMER_INCOME_REPORT_MONTH: (
+        "At least one customer income item contains duplicate monthly report month values."
+    ),
     messages.CUSTOMER_INCOME_BUCKET_TOTAL_MISMATCH: (
         "The sum of bucket registered income amounts did not match the summary registered income amount."
+    ),
+    messages.INVALID_CUSTOMER_INCOME_REPORT_MONTH: (
+        "A customer income monthly report month did not match YYYY-MM."
     ),
     messages.SERVICE_PROJECT_NOT_FOUND: "Requested service project record was not found.",
     messages.SERVICE_GROUP_NOT_FOUND: "Requested service group record was not found.",

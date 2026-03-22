@@ -6,8 +6,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
-from app.common.messages import CUSTOMER_INCOME_BUCKET_TOTAL_MISMATCH
-from app.modules.customers.schemas import Customer, CustomerIncomeBucket, CustomerIncomeSummary
+from app.common.messages import (
+    CUSTOMER_INCOME_BUCKET_TOTAL_MISMATCH,
+    DUPLICATE_CUSTOMER_INCOME_REPORT_MONTH,
+)
+from app.modules.customers.schemas import (
+    Customer,
+    CustomerIncomeBucket,
+    CustomerIncomeMonthlyReport,
+    CustomerIncomeSummary,
+)
 from app.modules.customers.service import CustomerIncomeImportService
 from app.modules.users.schemas import User
 
@@ -296,6 +304,7 @@ def test_customer_income_endpoints_return_expected_shapes(
         CONSTRUCTION_BUCKET_NAME,
         SERVICE_BUCKET_NAME,
     ]
+    assert detail_payload["monthly_reports"] == []
 
 
 def test_bulk_upsert_customer_income_updates_multiple_customers(
@@ -352,6 +361,22 @@ def test_bulk_upsert_customer_income_updates_multiple_customers(
                             "registered_income_amount": 700,
                         },
                     ],
+                    "monthly_reports": [
+                        {
+                            "month": "2025-12",
+                            "registered_income_amount": 100,
+                            "issued_bill_count": 10,
+                            "paid_bill_count": 9,
+                            "collection_rate_percent": 90,
+                        },
+                        {
+                            "month": "2026-01",
+                            "registered_income_amount": 120,
+                            "issued_bill_count": 12,
+                            "paid_bill_count": 10,
+                            "collection_rate_percent": 83.3,
+                        },
+                    ],
                 },
                 {
                     "customer_id": qom_customer.id,
@@ -368,6 +393,15 @@ def test_bulk_upsert_customer_income_updates_multiple_customers(
                             "registered_income_amount": 900,
                         }
                     ],
+                    "monthly_reports": [
+                        {
+                            "month": "2026-02",
+                            "registered_income_amount": 90,
+                            "issued_bill_count": 7,
+                            "paid_bill_count": 6,
+                            "collection_rate_percent": 85.7,
+                        }
+                    ],
                 },
             ]
         },
@@ -382,6 +416,11 @@ def test_bulk_upsert_customer_income_updates_multiple_customers(
     assert payload[0]["summary"]["registered_income_amount"] == 1300
     assert payload[1]["summary"]["registered_income_amount"] == 900
     assert [item["bucket_code"] for item in payload[1]["buckets"]] == ["210100"]
+    assert [item["month"] for item in payload[0]["monthly_reports"]] == [
+        "2025-12",
+        "2026-01",
+    ]
+    assert [item["month"] for item in payload[1]["monthly_reports"]] == ["2026-02"]
 
     db_session.expire_all()
     tehran_summary = db_session.get(CustomerIncomeSummary, tehran_customer.id)
@@ -400,6 +439,128 @@ def test_bulk_upsert_customer_income_updates_multiple_customers(
     )
     assert [item.bucket_code for item in qom_buckets] == ["210100"]
     assert [item.bucket_name for item in qom_buckets] == ["Permit Fees"]
+
+    tehran_monthly_reports = list(
+        db_session.scalars(
+            select(CustomerIncomeMonthlyReport)
+            .where(CustomerIncomeMonthlyReport.customer_id == tehran_customer.id)
+            .order_by(CustomerIncomeMonthlyReport.month.asc())
+        ).all()
+    )
+    assert [item.month for item in tehran_monthly_reports] == [
+        "2025-12",
+        "2026-01",
+    ]
+    assert [item.registered_income_amount for item in tehran_monthly_reports] == [100, 120]
+
+
+def test_bulk_upsert_customer_income_preserves_monthly_reports_when_field_is_omitted(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    workbook_path = tmp_path / "Book1.xlsx"
+    _write_income_workbook(workbook_path)
+
+    import_service = CustomerIncomeImportService(db_session=db_session)
+    import_service.import_workbook(workbook_path=workbook_path)
+
+    admin = _create_user(
+        db_session=db_session,
+        full_name="Income Admin",
+        mobile="09129990005",
+        role=UserRole.ADMIN,
+        customer_id=None,
+    )
+    admin_headers = {"Authorization": f"Bearer {_login(client=client, mobile=admin.mobile)}"}
+
+    tehran_customer = db_session.scalar(
+        select(Customer).where(Customer.name == TEHRAN_CUSTOMER_NAME)
+    )
+    assert tehran_customer is not None
+
+    first_response = client.put(
+        "/customers/income",
+        headers=admin_headers,
+        json={
+            "items": [
+                {
+                    "customer_id": tehran_customer.id,
+                    "summary": {
+                        "registered_income_amount": 1000,
+                        "issued_bill_count": 100,
+                        "paid_bill_count": 80,
+                        "collection_rate_percent": 80,
+                    },
+                    "buckets": [
+                        {
+                            "bucket_code": "110400",
+                            "bucket_name": CONSTRUCTION_BUCKET_NAME,
+                            "registered_income_amount": 400,
+                        },
+                        {
+                            "bucket_code": "110500",
+                            "bucket_name": SERVICE_BUCKET_NAME,
+                            "registered_income_amount": 600,
+                        },
+                    ],
+                    "monthly_reports": [
+                        {
+                            "month": "2025-11",
+                            "registered_income_amount": 80,
+                            "issued_bill_count": 8,
+                            "paid_bill_count": 7,
+                            "collection_rate_percent": 87.5,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    assert first_response.status_code == 200
+
+    second_response = client.put(
+        "/customers/income",
+        headers=admin_headers,
+        json={
+            "items": [
+                {
+                    "customer_id": tehran_customer.id,
+                    "summary": {
+                        "registered_income_amount": 1100,
+                        "issued_bill_count": 101,
+                        "paid_bill_count": 81,
+                        "collection_rate_percent": 80.2,
+                    },
+                    "buckets": [
+                        {
+                            "bucket_code": "110400",
+                            "bucket_name": CONSTRUCTION_BUCKET_NAME,
+                            "registered_income_amount": 500,
+                        },
+                        {
+                            "bucket_code": "110500",
+                            "bucket_name": SERVICE_BUCKET_NAME,
+                            "registered_income_amount": 600,
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    assert second_response.status_code == 200
+    assert [item["month"] for item in second_response.json()[0]["monthly_reports"]] == ["2025-11"]
+
+    db_session.expire_all()
+    monthly_reports = list(
+        db_session.scalars(
+            select(CustomerIncomeMonthlyReport)
+            .where(CustomerIncomeMonthlyReport.customer_id == tehran_customer.id)
+            .order_by(CustomerIncomeMonthlyReport.month.asc())
+        ).all()
+    )
+    assert [item.month for item in monthly_reports] == ["2025-11"]
+    assert [item.registered_income_amount for item in monthly_reports] == [80]
 
 
 def test_bulk_upsert_customer_income_rejects_bucket_total_mismatch(
@@ -458,3 +619,77 @@ def test_bulk_upsert_customer_income_rejects_bucket_total_mismatch(
     )
     assert response.status_code == 422
     assert response.json()["message"] == CUSTOMER_INCOME_BUCKET_TOTAL_MISMATCH
+
+
+def test_bulk_upsert_customer_income_rejects_duplicate_report_months(
+    client: TestClient,
+    db_session: Session,
+    tmp_path: Path,
+) -> None:
+    workbook_path = tmp_path / "Book1.xlsx"
+    _write_income_workbook(workbook_path)
+
+    import_service = CustomerIncomeImportService(db_session=db_session)
+    import_service.import_workbook(workbook_path=workbook_path)
+
+    admin = _create_user(
+        db_session=db_session,
+        full_name="Income Admin",
+        mobile="09129990006",
+        role=UserRole.ADMIN,
+        customer_id=None,
+    )
+    admin_headers = {"Authorization": f"Bearer {_login(client=client, mobile=admin.mobile)}"}
+
+    tehran_customer = db_session.scalar(
+        select(Customer).where(Customer.name == TEHRAN_CUSTOMER_NAME)
+    )
+    assert tehran_customer is not None
+
+    response = client.put(
+        "/customers/income",
+        headers=admin_headers,
+        json={
+            "items": [
+                {
+                    "customer_id": tehran_customer.id,
+                    "summary": {
+                        "registered_income_amount": 1000,
+                        "issued_bill_count": 100,
+                        "paid_bill_count": 80,
+                        "collection_rate_percent": 80,
+                    },
+                    "buckets": [
+                        {
+                            "bucket_code": "110400",
+                            "bucket_name": CONSTRUCTION_BUCKET_NAME,
+                            "registered_income_amount": 400,
+                        },
+                        {
+                            "bucket_code": "110500",
+                            "bucket_name": SERVICE_BUCKET_NAME,
+                            "registered_income_amount": 600,
+                        },
+                    ],
+                    "monthly_reports": [
+                        {
+                            "month": "2025-12",
+                            "registered_income_amount": 100,
+                            "issued_bill_count": 10,
+                            "paid_bill_count": 9,
+                            "collection_rate_percent": 90,
+                        },
+                        {
+                            "month": "2025-12",
+                            "registered_income_amount": 120,
+                            "issued_bill_count": 12,
+                            "paid_bill_count": 10,
+                            "collection_rate_percent": 83.3,
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["message"] == DUPLICATE_CUSTOMER_INCOME_REPORT_MONTH

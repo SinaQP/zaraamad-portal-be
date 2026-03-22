@@ -205,8 +205,9 @@ def bulk_upsert_customer_income(
             customer=customer,
             income_summary=income_summary,
             buckets=buckets,
+            monthly_reports=monthly_reports,
         )
-        for customer, income_summary, buckets in rows
+        for customer, income_summary, buckets, monthly_reports in rows
     ]
 
 
@@ -251,7 +252,7 @@ def get_customer_income_detail(
     service: CustomerIncomeService = Depends(get_customer_income_service),
     mapper: CustomerMapper = Depends(get_customer_mapper),
 ) -> CustomerIncomeDetailOut:
-    customer, income_summary, buckets = service.get_detail(
+    customer, income_summary, buckets, monthly_reports = service.get_detail(
         customer_id=customer_id,
         current_user=current_user,
     )
@@ -259,6 +260,7 @@ def get_customer_income_detail(
         customer=customer,
         income_summary=income_summary,
         buckets=buckets,
+        monthly_reports=monthly_reports,
     )
 
 
