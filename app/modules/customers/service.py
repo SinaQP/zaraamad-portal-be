@@ -24,9 +24,13 @@ from app.common.messages import (
     CUSTOMER_BRIDGE_REQUEST_FAILED,
     CUSTOMER_BRIDGE_SUBSCRIPTION_NOT_CACHED,
     CUSTOMER_BRIDGE_UNAVAILABLE,
+    CUSTOMER_ID_INVALID_OR_INACTIVE,
+    CUSTOMER_INCOME_BUCKET_TOTAL_MISMATCH,
     CUSTOMER_INCOME_NOT_FOUND,
     CUSTOMER_NOT_FOUND,
     DATA_INTEGRITY_ERROR,
+    DUPLICATE_CUSTOMER_INCOME_BUCKET_CODE,
+    DUPLICATE_CUSTOMER_INCOME_CUSTOMER,
 )
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.common.services.bridge_client import (
@@ -43,7 +47,13 @@ from app.common.services.bridge_client import (
     BridgeUnexpectedStatusError,
     get_bridge_client,
 )
-from app.modules.customers.dtos import CustomerBridgeConfigUpdate, CustomerCreate, CustomerUpdate
+from app.modules.customers.dtos import (
+    CustomerBridgeConfigUpdate,
+    CustomerCreate,
+    CustomerIncomeBulkUpsertCreate,
+    CustomerIncomeBulkUpsertItemCreate,
+    CustomerUpdate,
+)
 from app.modules.customers.schemas import (
     Customer,
     CustomerBridgeConfig,
@@ -329,26 +339,26 @@ DEFAULT_IMPORTED_CUSTOMER_GRADE = 1
 @dataclass(frozen=True)
 class ImportedCustomerIncomeSummary:
     customer_name: str
-    registered_income_amount_12m: int | None
-    issued_bills_count_12m: int | None
-    paid_bills_count_12m: int | None
-    collection_rate_percent_12m: float | None
+    registered_income_amount: int | None
+    issued_bill_count: int | None
+    paid_bill_count: int | None
+    collection_rate_percent: float | None
 
 
 @dataclass(frozen=True)
 class ImportedCustomerIncomeBucket:
     customer_name: str
     bucket_code: str
-    chart_label: str | None
-    registered_income_amount_12m: int | None
+    bucket_name: str | None
+    registered_income_amount: int | None
 
 
 @dataclass(frozen=True)
 class CustomerIncomeValidationFailure:
     customer_name: str
     message: str
-    summary_registered_income_amount_12m: int | None
-    bucket_total_registered_income_amount_12m: int | None
+    summary_registered_income_amount: int | None
+    bucket_total_registered_income_amount: int | None
 
 
 @dataclass(frozen=True)
@@ -369,10 +379,10 @@ class CustomerIncomeImportReport:
 class CustomerIncomeQueryBuilder:
     SORT_COLUMNS = {
         "customer_name": Customer.name,
-        "registered_income_amount_12m": CustomerIncomeSummary.registered_income_amount_12m,
-        "issued_bills_count_12m": CustomerIncomeSummary.issued_bills_count_12m,
-        "paid_bills_count_12m": CustomerIncomeSummary.paid_bills_count_12m,
-        "collection_rate_percent_12m": CustomerIncomeSummary.collection_rate_percent_12m,
+        "registered_income_amount": CustomerIncomeSummary.registered_income_amount,
+        "issued_bill_count": CustomerIncomeSummary.issued_bill_count,
+        "paid_bill_count": CustomerIncomeSummary.paid_bill_count,
+        "collection_rate_percent": CustomerIncomeSummary.collection_rate_percent,
         "created_at": CustomerIncomeSummary.created_at,
         "updated_at": CustomerIncomeSummary.updated_at,
     }
@@ -427,6 +437,82 @@ class CustomerScopedAccessPolicy:
         )
 
 
+class CustomerIncomeMutationPolicy:
+    def __init__(self, db_session: Session) -> None:
+        self._db_session = db_session
+
+    def validate_payload(self, *, items: list[CustomerIncomeBulkUpsertItemCreate]) -> None:
+        self._validate_unique_customer_ids(items=items)
+        for item in items:
+            self._validate_unique_bucket_codes(item=item)
+            self._validate_bucket_total(item=item)
+
+    def get_active_customer_map(
+        self,
+        *,
+        customer_ids: list[int],
+    ) -> dict[int, Customer]:
+        customers = list(
+            self._db_session.scalars(
+                select(Customer)
+                .where(Customer.id.in_(customer_ids))
+                .where(Customer.is_active.is_(True))
+            ).all()
+        )
+        customer_map = {customer.id: customer for customer in customers}
+        if len(customer_map) != len(set(customer_ids)):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=CUSTOMER_ID_INVALID_OR_INACTIVE,
+            )
+        return customer_map
+
+    def _validate_unique_customer_ids(
+        self,
+        *,
+        items: list[CustomerIncomeBulkUpsertItemCreate],
+    ) -> None:
+        customer_ids = [item.customer_id for item in items]
+        if len(customer_ids) != len(set(customer_ids)):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=DUPLICATE_CUSTOMER_INCOME_CUSTOMER,
+            )
+
+    def _validate_unique_bucket_codes(
+        self,
+        *,
+        item: CustomerIncomeBulkUpsertItemCreate,
+    ) -> None:
+        bucket_codes = [bucket.bucket_code for bucket in item.buckets]
+        if len(bucket_codes) != len(set(bucket_codes)):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=DUPLICATE_CUSTOMER_INCOME_BUCKET_CODE,
+            )
+
+    def _validate_bucket_total(
+        self,
+        *,
+        item: CustomerIncomeBulkUpsertItemCreate,
+    ) -> None:
+        summary_amount = item.summary.registered_income_amount
+        bucket_amounts = [
+            bucket.registered_income_amount
+            for bucket in item.buckets
+            if bucket.registered_income_amount is not None
+        ]
+        has_bucket_values = len(bucket_amounts) > 0
+        bucket_total = sum(bucket_amounts)
+        if summary_amount is None and not has_bucket_values:
+            return
+        if summary_amount != bucket_total:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=CUSTOMER_INCOME_BUCKET_TOTAL_MISMATCH,
+            )
+
+
 class CustomerIncomeService:
     def __init__(
         self,
@@ -437,6 +523,7 @@ class CustomerIncomeService:
         self._customer_service = customer_service
         self._query_builder = CustomerIncomeQueryBuilder()
         self._access_policy = CustomerScopedAccessPolicy()
+        self._mutation_policy = CustomerIncomeMutationPolicy(db_session=db_session)
 
     def list_summaries(
         self,
@@ -493,13 +580,129 @@ class CustomerIncomeService:
         buckets = list(self._db_session.scalars(bucket_query).all())
         return customer, income_summary, buckets
 
+    def bulk_upsert(
+        self,
+        *,
+        dto: CustomerIncomeBulkUpsertCreate,
+    ) -> list[tuple[Customer, CustomerIncomeSummary, list[CustomerIncomeBucket]]]:
+        self._mutation_policy.validate_payload(items=dto.items)
+        customer_ids = [item.customer_id for item in dto.items]
+        customer_map = self._mutation_policy.get_active_customer_map(customer_ids=customer_ids)
+        summary_map = self._get_income_summary_map(customer_ids=customer_ids)
+
+        self._db_session.execute(
+            delete(CustomerIncomeBucket).where(
+                CustomerIncomeBucket.customer_id.in_(customer_ids)
+            )
+        )
+
+        for item in dto.items:
+            income_summary = summary_map.get(item.customer_id)
+            if income_summary is None:
+                income_summary = CustomerIncomeSummary(customer_id=item.customer_id)
+                self._db_session.add(income_summary)
+                summary_map[item.customer_id] = income_summary
+
+            income_summary.registered_income_amount = item.summary.registered_income_amount
+            income_summary.issued_bill_count = item.summary.issued_bill_count
+            income_summary.paid_bill_count = item.summary.paid_bill_count
+            income_summary.collection_rate_percent = item.summary.collection_rate_percent
+
+            for bucket in item.buckets:
+                self._db_session.add(
+                    CustomerIncomeBucket(
+                        customer_id=item.customer_id,
+                        bucket_code=bucket.bucket_code,
+                        bucket_name=bucket.bucket_name,
+                        registered_income_amount=bucket.registered_income_amount,
+                    )
+                )
+
+        self._commit_with_integrity_guard()
+
+        for customer_id in customer_ids:
+            self._db_session.refresh(summary_map[customer_id])
+
+        bucket_map = self._get_bucket_map(customer_ids=customer_ids)
+        return [
+            (
+                customer_map[item.customer_id],
+                summary_map[item.customer_id],
+                bucket_map.get(item.customer_id, []),
+            )
+            for item in dto.items
+        ]
+
+    def _get_income_summary_map(
+        self,
+        *,
+        customer_ids: list[int],
+    ) -> dict[int, CustomerIncomeSummary]:
+        summaries = list(
+            self._db_session.scalars(
+                select(CustomerIncomeSummary).where(
+                    CustomerIncomeSummary.customer_id.in_(customer_ids)
+                )
+            ).all()
+        )
+        return {summary.customer_id: summary for summary in summaries}
+
+    def _get_bucket_map(
+        self,
+        *,
+        customer_ids: list[int],
+    ) -> dict[int, list[CustomerIncomeBucket]]:
+        buckets = list(
+            self._db_session.scalars(
+                select(CustomerIncomeBucket)
+                .where(CustomerIncomeBucket.customer_id.in_(customer_ids))
+                .order_by(
+                    CustomerIncomeBucket.customer_id.asc(),
+                    CustomerIncomeBucket.bucket_code.asc(),
+                    CustomerIncomeBucket.id.asc(),
+                )
+            ).all()
+        )
+        bucket_map: dict[int, list[CustomerIncomeBucket]] = {}
+        for bucket in buckets:
+            bucket_map.setdefault(bucket.customer_id, []).append(bucket)
+        return bucket_map
+
+    def _commit_with_integrity_guard(self) -> None:
+        try:
+            self._db_session.commit()
+        except IntegrityError as exc:
+            self._db_session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=DATA_INTEGRITY_ERROR,
+            ) from exc
+
 
 class CustomerIncomeImportService:
-    SUMMARY_HEADER_FALLBACKS = {
-        "registered_income_amount_12m": 0,
-        "issued_bills_count_12m": 1,
-        "paid_bills_count_12m": 2,
-        "collection_rate_percent_12m": 3,
+    SUMMARY_COLUMN_FALLBACKS = {
+        "registered_income_amount": 0,
+        "issued_bill_count": 1,
+        "paid_bill_count": 2,
+        "collection_rate_percent": 3,
+    }
+    SUMMARY_HEADER_ALIASES = {
+        "registered_income_amount": (
+            "registered_income_amount",
+            "registered_income_amount_12m",
+        ),
+        "issued_bill_count": (
+            "issued_bill_count",
+            "issued_bills_count_12m",
+        ),
+        "paid_bill_count": (
+            "paid_bill_count",
+            "paid_bills_count_12m",
+        ),
+        "collection_rate_percent": (
+            "collection_rate_percent",
+            "collection_rate_percent_12m",
+        ),
     }
 
     def __init__(self, db_session: Session) -> None:
@@ -531,17 +734,17 @@ class CustomerIncomeImportService:
                 if income_summary is None:
                     income_summary = CustomerIncomeSummary(customer_id=customer.id)
                     self._db_session.add(income_summary)
-                income_summary.registered_income_amount_12m = (
-                    summary_row.registered_income_amount_12m if summary_row else None
+                income_summary.registered_income_amount = (
+                    summary_row.registered_income_amount if summary_row else None
                 )
-                income_summary.issued_bills_count_12m = (
-                    summary_row.issued_bills_count_12m if summary_row else None
+                income_summary.issued_bill_count = (
+                    summary_row.issued_bill_count if summary_row else None
                 )
-                income_summary.paid_bills_count_12m = (
-                    summary_row.paid_bills_count_12m if summary_row else None
+                income_summary.paid_bill_count = (
+                    summary_row.paid_bill_count if summary_row else None
                 )
-                income_summary.collection_rate_percent_12m = (
-                    summary_row.collection_rate_percent_12m if summary_row else None
+                income_summary.collection_rate_percent = (
+                    summary_row.collection_rate_percent if summary_row else None
                 )
                 upserted_summary_count += 1
 
@@ -556,8 +759,8 @@ class CustomerIncomeImportService:
                         CustomerIncomeBucket(
                             customer_id=customer.id,
                             bucket_code=bucket_row.bucket_code,
-                            chart_label=bucket_row.chart_label,
-                            registered_income_amount_12m=bucket_row.registered_income_amount_12m,
+                            bucket_name=bucket_row.bucket_name,
+                            registered_income_amount=bucket_row.registered_income_amount,
                         )
                     )
                 upserted_bucket_count += len(customer_buckets)
@@ -650,32 +853,32 @@ class CustomerIncomeImportService:
             parsed_rows.append(
                 ImportedCustomerIncomeSummary(
                     customer_name=customer_name,
-                    registered_income_amount_12m=self._parse_int(
+                    registered_income_amount=self._parse_int(
                         self._value_from_row(
                             row=row,
                             header_lookup=header_lookup,
-                            field_name="registered_income_amount_12m",
+                            field_name="registered_income_amount",
                         )
                     ),
-                    issued_bills_count_12m=self._parse_int(
+                    issued_bill_count=self._parse_int(
                         self._value_from_row(
                             row=row,
                             header_lookup=header_lookup,
-                            field_name="issued_bills_count_12m",
+                            field_name="issued_bill_count",
                         )
                     ),
-                    paid_bills_count_12m=self._parse_int(
+                    paid_bill_count=self._parse_int(
                         self._value_from_row(
                             row=row,
                             header_lookup=header_lookup,
-                            field_name="paid_bills_count_12m",
+                            field_name="paid_bill_count",
                         )
                     ),
-                    collection_rate_percent_12m=self._parse_float(
+                    collection_rate_percent=self._parse_float(
                         self._value_from_row(
                             row=row,
                             header_lookup=header_lookup,
-                            field_name="collection_rate_percent_12m",
+                            field_name="collection_rate_percent",
                         )
                     ),
                 )
@@ -707,21 +910,21 @@ class CustomerIncomeImportService:
                 ImportedCustomerIncomeBucket(
                     customer_name=current_customer_name,
                     bucket_code=bucket_code,
-                    chart_label=self._normalize_text(row[1] if len(row) > 1 else None),
-                    registered_income_amount_12m=self._parse_int(row[2] if len(row) > 2 else None),
+                    bucket_name=self._normalize_text(row[1] if len(row) > 1 else None),
+                    registered_income_amount=self._parse_int(row[2] if len(row) > 2 else None),
                 )
             )
 
-        canonical_labels = self._build_canonical_bucket_labels(bucket_rows=raw_rows)
+        canonical_bucket_names = self._build_canonical_bucket_names(bucket_rows=raw_rows)
         return [
             ImportedCustomerIncomeBucket(
                 customer_name=item.customer_name,
                 bucket_code=item.bucket_code,
-                chart_label=self._resolve_chart_label(
-                    raw_label=item.chart_label,
-                    canonical_label=canonical_labels.get(item.bucket_code),
+                bucket_name=self._resolve_bucket_name(
+                    raw_name=item.bucket_name,
+                    canonical_name=canonical_bucket_names.get(item.bucket_code),
                 ),
-                registered_income_amount_12m=item.registered_income_amount_12m,
+                registered_income_amount=item.registered_income_amount,
             )
             for item in raw_rows
         ]
@@ -739,18 +942,18 @@ class CustomerIncomeImportService:
         bucket_customer_names = {item.customer_name for item in buckets}
         bucket_totals: dict[str, int] = {}
         for bucket in buckets:
-            if bucket.registered_income_amount_12m is None:
+            if bucket.registered_income_amount is None:
                 continue
             bucket_totals[bucket.customer_name] = (
                 bucket_totals.get(bucket.customer_name, 0)
-                + bucket.registered_income_amount_12m
+                + bucket.registered_income_amount
             )
 
         failures: list[CustomerIncomeValidationFailure] = []
         for customer_name in sorted(set(summaries_by_name) | bucket_customer_names):
             summary_row = summaries_by_name.get(customer_name)
             summary_amount = (
-                summary_row.registered_income_amount_12m
+                summary_row.registered_income_amount
                 if summary_row is not None
                 else None
             )
@@ -760,8 +963,8 @@ class CustomerIncomeImportService:
                     CustomerIncomeValidationFailure(
                         customer_name=customer_name,
                         message="Summary row missing in Sheet1.",
-                        summary_registered_income_amount_12m=None,
-                        bucket_total_registered_income_amount_12m=bucket_total,
+                        summary_registered_income_amount=None,
+                        bucket_total_registered_income_amount=bucket_total,
                     )
                 )
                 continue
@@ -770,8 +973,8 @@ class CustomerIncomeImportService:
                     CustomerIncomeValidationFailure(
                         customer_name=customer_name,
                         message="Bucket breakdown rows missing in Sheet2.",
-                        summary_registered_income_amount_12m=summary_amount,
-                        bucket_total_registered_income_amount_12m=None,
+                        summary_registered_income_amount=summary_amount,
+                        bucket_total_registered_income_amount=None,
                     )
                 )
                 continue
@@ -780,8 +983,8 @@ class CustomerIncomeImportService:
                     CustomerIncomeValidationFailure(
                         customer_name=customer_name,
                         message="Bucket total does not match summary registered income.",
-                        summary_registered_income_amount_12m=summary_amount,
-                        bucket_total_registered_income_amount_12m=bucket_total,
+                        summary_registered_income_amount=summary_amount,
+                        bucket_total_registered_income_amount=bucket_total,
                     )
                 )
         return failures
@@ -807,35 +1010,47 @@ class CustomerIncomeImportService:
         header_lookup: dict[str, int],
         field_name: str,
     ) -> object | None:
-        column_index = header_lookup.get(
-            field_name,
-            self.SUMMARY_HEADER_FALLBACKS[field_name],
+        column_index = self._resolve_summary_column_index(
+            header_lookup=header_lookup,
+            field_name=field_name,
         )
         if column_index >= len(row):
             return None
         return row[column_index]
 
-    def _build_canonical_bucket_labels(
+    def _resolve_summary_column_index(
+        self,
+        *,
+        header_lookup: dict[str, int],
+        field_name: str,
+    ) -> int:
+        for header_name in self.SUMMARY_HEADER_ALIASES[field_name]:
+            column_index = header_lookup.get(header_name)
+            if column_index is not None:
+                return column_index
+        return self.SUMMARY_COLUMN_FALLBACKS[field_name]
+
+    def _build_canonical_bucket_names(
         self,
         *,
         bucket_rows: list[ImportedCustomerIncomeBucket],
     ) -> dict[str, str]:
-        canonical_labels: dict[str, str] = {}
+        canonical_bucket_names: dict[str, str] = {}
         for row in bucket_rows:
-            if row.chart_label is None or self._is_numeric_like(row.chart_label):
+            if row.bucket_name is None or self._is_numeric_like(row.bucket_name):
                 continue
-            canonical_labels.setdefault(row.bucket_code, row.chart_label)
-        return canonical_labels
+            canonical_bucket_names.setdefault(row.bucket_code, row.bucket_name)
+        return canonical_bucket_names
 
-    def _resolve_chart_label(
+    def _resolve_bucket_name(
         self,
         *,
-        raw_label: str | None,
-        canonical_label: str | None,
+        raw_name: str | None,
+        canonical_name: str | None,
     ) -> str | None:
-        if raw_label is None or self._is_numeric_like(raw_label):
-            return canonical_label or raw_label
-        return raw_label
+        if raw_name is None or self._is_numeric_like(raw_name):
+            return canonical_name or raw_name
+        return raw_name
 
     def _normalize_bucket_code(self, value: object | None) -> str | None:
         normalized_text = self._normalize_text(value)

@@ -11,8 +11,9 @@ from app.modules.customers.dtos import (
     CustomerBridgeConfigOut,
     CustomerBridgeConfigUpdate,
     CustomerBridgeHealthOut,
+    CustomerIncomeBulkUpsertCreate,
     CustomerIncomeDetailOut,
-    CustomerIncomeSummaryListOut,
+    CustomerIncomeListOut,
     CustomerBridgeSubscriptionOut,
     CustomerCreate,
     CustomerListOut,
@@ -134,7 +135,7 @@ def get_all_customers(
 @router.get(
     "/income",
     tags=[CUSTOMERS_TAG],
-    response_model=CustomerIncomeSummaryListOut,
+    response_model=CustomerIncomeListOut,
     summary="List customer income summaries",
     description="Return imported 12-month income summaries for active customers.",
     responses={
@@ -147,10 +148,10 @@ def list_customer_income_summaries(
     search: str | None = Query(default=None, description="Search by customer name."),
     sort_by: Literal[
         "customer_name",
-        "registered_income_amount_12m",
-        "issued_bills_count_12m",
-        "paid_bills_count_12m",
-        "collection_rate_percent_12m",
+        "registered_income_amount",
+        "issued_bill_count",
+        "paid_bill_count",
+        "collection_rate_percent",
         "created_at",
         "updated_at",
     ] = Query(default="customer_name", description="Sort field."),
@@ -159,7 +160,7 @@ def list_customer_income_summaries(
     _: object = Depends(require_admin),
     service: CustomerIncomeService = Depends(get_customer_income_service),
     mapper: CustomerMapper = Depends(get_customer_mapper),
-) -> CustomerIncomeSummaryListOut:
+) -> CustomerIncomeListOut:
     rows, meta = service.list_summaries(
         search=search,
         sort_by=sort_by,
@@ -167,13 +168,46 @@ def list_customer_income_summaries(
         pagination=pagination,
     )
     set_pagination_headers(response=response, meta=meta)
-    return CustomerIncomeSummaryListOut(
+    return CustomerIncomeListOut(
         items=[
-            mapper.to_income_summary_out(customer=customer, income_summary=income_summary)
+            mapper.to_income_list_item_out(customer=customer, income_summary=income_summary)
             for customer, income_summary in rows
         ],
         total_page=meta.total_pages,
     )
+
+
+@router.put(
+    "/income",
+    tags=[CUSTOMERS_TAG],
+    response_model=list[CustomerIncomeDetailOut],
+    summary="Bulk upsert customer income",
+    description=(
+        "Create or replace stored income summary and bucket breakdown data for one or more customers. "
+        "Send one item to update a single customer."
+    ),
+    responses={
+        200: {"description": "Customer income datasets upserted."},
+        403: {"description": "Admin access required."},
+        409: {"description": "Data integrity error."},
+        422: {"description": "Payload validation failed."},
+    },
+)
+def bulk_upsert_customer_income(
+    payload: CustomerIncomeBulkUpsertCreate,
+    _: object = Depends(require_admin),
+    service: CustomerIncomeService = Depends(get_customer_income_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> list[CustomerIncomeDetailOut]:
+    rows = service.bulk_upsert(dto=payload)
+    return [
+        mapper.to_income_detail_out(
+            customer=customer,
+            income_summary=income_summary,
+            buckets=buckets,
+        )
+        for customer, income_summary, buckets in rows
+    ]
 
 
 @router.get(

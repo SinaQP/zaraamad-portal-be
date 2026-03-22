@@ -50,10 +50,10 @@ class CustomerIncomeSummary(Base, TimestampMixin):
         ForeignKey("customers.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    registered_income_amount_12m: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    issued_bills_count_12m: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    paid_bills_count_12m: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    collection_rate_percent_12m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    registered_income_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    issued_bill_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    paid_bill_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    collection_rate_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class CustomerIncomeBucket(Base, TimestampMixin):
@@ -73,5 +73,5 @@ class CustomerIncomeBucket(Base, TimestampMixin):
         index=True,
     )
     bucket_code: Mapped[str] = mapped_column(String(50), nullable=False)
-    chart_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    registered_income_amount_12m: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    bucket_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    registered_income_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

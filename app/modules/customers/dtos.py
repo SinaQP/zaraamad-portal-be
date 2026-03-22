@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import Field, field_validator, model_validator
 
 from app.common.dtos import MongoDTO, WithId
+from app.common.messages import ITEMS_MUST_NOT_BE_EMPTY
 from app.common.pagination import PaginatedResponse
 
 
@@ -50,48 +51,56 @@ class CustomerListOut(PaginatedResponse[CustomerOut]):
     pass
 
 
-class CustomerIncomeSummaryBase(MongoDTO):
-    registered_income_amount_12m: int | None = Field(
+class CustomerIncomeMetricsBase(MongoDTO):
+    registered_income_amount: int | None = Field(
         default=None,
         description="Registered income amount over the last 12 months.",
         examples=[1250000000],
     )
-    issued_bills_count_12m: int | None = Field(
+    issued_bill_count: int | None = Field(
         default=None,
         description="Issued bills count over the last 12 months.",
         examples=[3200],
     )
-    paid_bills_count_12m: int | None = Field(
+    paid_bill_count: int | None = Field(
         default=None,
         description="Paid bills count over the last 12 months.",
         examples=[2800],
     )
-    collection_rate_percent_12m: float | None = Field(
+    collection_rate_percent: float | None = Field(
         default=None,
         description="Collection rate percentage over the last 12 months.",
         examples=[87.5],
     )
 
 
-class CustomerIncomeSummaryOut(CustomerIncomeSummaryBase):
-    customer_id: int = Field(..., description="Customer id.", examples=[1])
-    customer_name: str = Field(..., description="Customer name.", examples=["شهرداری تهران"])
+class CustomerIncomeSummaryOut(CustomerIncomeMetricsBase):
     created_at: datetime = Field(..., description="Creation timestamp.")
     updated_at: datetime = Field(..., description="Last update timestamp.")
 
 
-class CustomerIncomeSummaryListOut(PaginatedResponse[CustomerIncomeSummaryOut]):
+class CustomerIncomeListCustomerOut(MongoDTO):
+    id: int = Field(..., description="Customer id.", examples=[1])
+    name: str = Field(..., description="Customer name.", examples=["Tehran Customer"])
+
+
+class CustomerIncomeListItemOut(MongoDTO):
+    customer: CustomerIncomeListCustomerOut = Field(..., description="Customer information.")
+    summary: CustomerIncomeSummaryOut = Field(..., description="Income summary for the customer.")
+
+
+class CustomerIncomeListOut(PaginatedResponse[CustomerIncomeListItemOut]):
     pass
 
 
 class CustomerIncomeBucketBase(MongoDTO):
     bucket_code: str = Field(..., description="Stable income bucket code.", examples=["110400"])
-    chart_label: str | None = Field(
+    bucket_name: str | None = Field(
         default=None,
         description="Display label for the income bucket.",
-        examples=["عوارض ساختمانی"],
+        examples=["Construction Fees"],
     )
-    registered_income_amount_12m: int | None = Field(
+    registered_income_amount: int | None = Field(
         default=None,
         description="Registered income amount for this bucket over the last 12 months.",
         examples=[420000000],
@@ -104,7 +113,7 @@ class CustomerIncomeBucketOut(CustomerIncomeBucketBase):
 
 class CustomerIncomeCustomerOut(MongoDTO):
     id: int = Field(..., description="Customer id.", examples=[1])
-    name: str = Field(..., description="Customer name.", examples=["شهرداری تهران"])
+    name: str = Field(..., description="Customer name.", examples=["Tehran Customer"])
     manager_name: str | None = Field(
         default=None,
         description="Customer manager or contract signatory name.",
@@ -113,18 +122,51 @@ class CustomerIncomeCustomerOut(MongoDTO):
     grade: int = Field(..., description="Customer grade.", examples=[1])
 
 
-class CustomerIncomeDetailSummaryOut(CustomerIncomeSummaryBase):
-    created_at: datetime = Field(..., description="Creation timestamp.")
-    updated_at: datetime = Field(..., description="Last update timestamp.")
-
-
 class CustomerIncomeDetailOut(MongoDTO):
     customer: CustomerIncomeCustomerOut = Field(..., description="Customer information.")
-    summary: CustomerIncomeDetailSummaryOut = Field(..., description="Income summary for the customer.")
+    summary: CustomerIncomeSummaryOut = Field(..., description="Income summary for the customer.")
     buckets: list[CustomerIncomeBucketOut] = Field(
         ...,
         description="Income bucket breakdown for the customer.",
     )
+
+
+class CustomerIncomeSummaryCreate(CustomerIncomeMetricsBase):
+    pass
+
+
+class CustomerIncomeBucketCreate(CustomerIncomeBucketBase):
+    pass
+
+
+class CustomerIncomeBulkUpsertItemBase(MongoDTO):
+    customer_id: int = Field(..., description="Customer id.", examples=[1])
+    summary: CustomerIncomeSummaryCreate = Field(..., description="Income summary for the customer.")
+    buckets: list[CustomerIncomeBucketCreate] = Field(
+        ...,
+        description="Income bucket breakdown for the customer.",
+    )
+
+
+class CustomerIncomeBulkUpsertItemCreate(CustomerIncomeBulkUpsertItemBase):
+    pass
+
+
+class CustomerIncomeBulkUpsertBase(MongoDTO):
+    items: list[CustomerIncomeBulkUpsertItemCreate] = Field(
+        ...,
+        description="Bulk upsert items for customer income datasets.",
+    )
+
+    @model_validator(mode="after")
+    def validate_non_empty_items(self) -> "CustomerIncomeBulkUpsertBase":
+        if len(self.items) == 0:
+            raise ValueError(ITEMS_MUST_NOT_BE_EMPTY)
+        return self
+
+
+class CustomerIncomeBulkUpsertCreate(CustomerIncomeBulkUpsertBase):
+    pass
 
 
 class CustomerUpdate(MongoDTO):
@@ -283,7 +325,7 @@ class CustomerBridgeSubscriptionBase(MongoDTO):
     last_subscription_error: str | None = Field(
         default=None,
         description="Last cached subscription refresh error for this customer bridge.",
-        examples=["هیچ اشتراک فعالی وجود ندارد."],
+        examples=["No active subscription exists."],
     )
 
 

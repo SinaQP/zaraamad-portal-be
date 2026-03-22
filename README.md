@@ -2,7 +2,7 @@
 
 Backend API for Zaraamad Portal Phase 1.
 
-Current release: `0.10.0`
+Current release: `0.12.0`
 
 ## Overview
 
@@ -228,6 +228,7 @@ Customers:
 - `POST /customers`
 - `GET /customers`
 - `GET /customers/income`
+- `PUT /customers/income`
 - `GET /customers/{customer_id}`
 - `GET /customers/{customer_id}/income`
 - `PATCH /customers/{customer_id}`

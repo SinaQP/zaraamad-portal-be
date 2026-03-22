@@ -44,8 +44,8 @@ def run() -> None:
     for failure in report.validation_failures:
         print(
             f"customer_name={failure.customer_name} "
-            f"summary_registered_income_amount_12m={failure.summary_registered_income_amount_12m} "
-            f"bucket_total_registered_income_amount_12m={failure.bucket_total_registered_income_amount_12m} "
+            f"summary_registered_income_amount={failure.summary_registered_income_amount} "
+            f"bucket_total_registered_income_amount={failure.bucket_total_registered_income_amount} "
             f"message={failure.message}"
         )
 
