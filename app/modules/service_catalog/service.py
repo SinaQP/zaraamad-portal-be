@@ -46,6 +46,11 @@ from app.modules.service_catalog.dtos import (
     CustomerServiceConfigUpdate,
     CustomerServicePurchaseCreate,
     CustomerServicePurchaseItemCreate,
+    CustomerServiceTreeGroupOut,
+    CustomerServiceTreeOut,
+    CustomerServiceTreeProjectOut,
+    CustomerServiceTreeServiceOut,
+    CustomerServiceTreeTotalsOut,
     CustomerServicePurchaseUpdate,
     ServiceCreate,
     ServiceGroupCreate,
@@ -54,6 +59,8 @@ from app.modules.service_catalog.dtos import (
     ServiceProjectUpdate,
     ServiceUpdate,
 )
+from app.modules.customers.dtos import CustomerOut
+from app.modules.customers.schemas import Customer
 from app.modules.service_catalog.schemas import (
     CustomerServiceConfig,
     CustomerServicePurchase,
@@ -1144,6 +1151,187 @@ class CustomerServicePurchaseService:
             ) from exc
 
 
+class CustomerServiceTreeService:
+    def __init__(self, db_session: Session) -> None:
+        self._db_session = db_session
+        self._access_policy = CustomerScopedAccessPolicy()
+
+    def get_tree(
+        self,
+        *,
+        customer_id: int,
+        current_user: CurrentUser,
+    ) -> CustomerServiceTreeOut:
+        customer = self._get_active_customer_or_404(customer_id=customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=customer_id,
+        )
+        rows = self._db_session.execute(
+            select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
+            .join(Service, Service.id == CustomerServiceConfig.service_id)
+            .join(ServiceGroup, ServiceGroup.id == Service.group_id)
+            .join(ServiceProject, ServiceProject.id == Service.project_id)
+            .where(
+                CustomerServiceConfig.customer_id == customer_id,
+                Service.is_active.is_(True),
+                ServiceGroup.is_active.is_(True),
+                ServiceProject.is_active.is_(True),
+            )
+            .order_by(
+                ServiceProject.sort_order.asc(),
+                ServiceProject.id.asc(),
+                ServiceGroup.sort_order.asc(),
+                ServiceGroup.id.asc(),
+                Service.sort_order.asc(),
+                Service.id.asc(),
+                CustomerServiceConfig.id.asc(),
+            )
+        ).all()
+
+        project_nodes: list[CustomerServiceTreeProjectOut] = []
+        project_bucket: dict[int, CustomerServiceTreeProjectOut] = {}
+        group_bucket: dict[tuple[int, int], CustomerServiceTreeGroupOut] = {}
+        overall_totals = self._new_totals()
+
+        for row in rows:
+            config: CustomerServiceConfig = row[0]
+            service: Service = row[1]
+            group: ServiceGroup = row[2]
+            project: ServiceProject = row[3]
+
+            project_node = project_bucket.get(project.id)
+            if project_node is None:
+                project_node = CustomerServiceTreeProjectOut(
+                    id=project.id,
+                    name=project.name,
+                    description=project.description,
+                    sort_order=project.sort_order,
+                    is_active=project.is_active,
+                    created_at=project.created_at,
+                    updated_at=project.updated_at,
+                    totals=self._new_totals(),
+                    groups=[],
+                )
+                project_bucket[project.id] = project_node
+                project_nodes.append(project_node)
+
+            group_key = (project.id, group.id)
+            group_node = group_bucket.get(group_key)
+            if group_node is None:
+                group_node = CustomerServiceTreeGroupOut(
+                    id=group.id,
+                    name=group.name,
+                    description=group.description,
+                    sort_order=group.sort_order,
+                    is_active=group.is_active,
+                    created_at=group.created_at,
+                    updated_at=group.updated_at,
+                    totals=self._new_totals(),
+                    services=[],
+                )
+                group_bucket[group_key] = group_node
+                project_node.groups.append(group_node)
+
+            sale_price_value = config.sale_price if config.sale_price is not None else 0
+            line_sale_total = sale_price_value if config.is_enabled else 0
+            line_support_total = config.support_price if config.is_enabled else 0
+            line_grand_total = line_sale_total + line_support_total
+
+            group_node.services.append(
+                CustomerServiceTreeServiceOut(
+                    config_id=config.id,
+                    customer_id=config.customer_id,
+                    service_id=service.id,
+                    service_name=service.name,
+                    service_description=service.description,
+                    service_sort_order=service.sort_order,
+                    service_is_active=service.is_active,
+                    is_enabled=config.is_enabled,
+                    sale_price=config.sale_price,
+                    support_price=config.support_price,
+                    notes=config.notes,
+                    line_sale_total=line_sale_total,
+                    line_support_total=line_support_total,
+                    line_grand_total=line_grand_total,
+                    config_created_at=config.created_at,
+                    config_updated_at=config.updated_at,
+                    service_created_at=service.created_at,
+                    service_updated_at=service.updated_at,
+                )
+            )
+
+            self._accumulate_totals(
+                totals=group_node.totals,
+                is_enabled=config.is_enabled,
+                line_sale_total=line_sale_total,
+                line_support_total=line_support_total,
+                line_grand_total=line_grand_total,
+            )
+            self._accumulate_totals(
+                totals=project_node.totals,
+                is_enabled=config.is_enabled,
+                line_sale_total=line_sale_total,
+                line_support_total=line_support_total,
+                line_grand_total=line_grand_total,
+            )
+            self._accumulate_totals(
+                totals=overall_totals,
+                is_enabled=config.is_enabled,
+                line_sale_total=line_sale_total,
+                line_support_total=line_support_total,
+                line_grand_total=line_grand_total,
+            )
+
+        return CustomerServiceTreeOut(
+            customer=CustomerOut(
+                id=customer.id,
+                name=customer.name,
+                manager_name=customer.manager_name,
+                grade=customer.grade,
+                is_active=customer.is_active,
+                created_at=customer.created_at,
+                updated_at=customer.updated_at,
+            ),
+            projects=project_nodes,
+            totals=overall_totals,
+        )
+
+    def _get_active_customer_or_404(self, *, customer_id: int) -> Customer:
+        customer = self._db_session.get(Customer, customer_id)
+        if customer is None or not customer.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=CUSTOMER_NOT_FOUND,
+            )
+        return customer
+
+    def _new_totals(self) -> CustomerServiceTreeTotalsOut:
+        return CustomerServiceTreeTotalsOut(
+            configured_service_count=0,
+            enabled_service_count=0,
+            sale_total=0,
+            support_total=0,
+            grand_total=0,
+        )
+
+    def _accumulate_totals(
+        self,
+        *,
+        totals: CustomerServiceTreeTotalsOut,
+        is_enabled: bool,
+        line_sale_total: int,
+        line_support_total: int,
+        line_grand_total: int,
+    ) -> None:
+        totals.configured_service_count += 1
+        if is_enabled:
+            totals.enabled_service_count += 1
+        totals.sale_total += line_sale_total
+        totals.support_total += line_support_total
+        totals.grand_total += line_grand_total
+
+
 class CustomerPricingSummaryService:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
@@ -1267,6 +1455,12 @@ def get_customer_service_purchase_service(
     db_session: Session = Depends(get_db_session),
 ) -> CustomerServicePurchaseService:
     return CustomerServicePurchaseService(db_session=db_session)
+
+
+def get_customer_service_tree_service(
+    db_session: Session = Depends(get_db_session),
+) -> CustomerServiceTreeService:
+    return CustomerServiceTreeService(db_session=db_session)
 
 
 def get_customer_pricing_summary_service(

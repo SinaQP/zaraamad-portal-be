@@ -10,6 +10,7 @@ from app.modules.service_catalog.dtos import (
     CustomerServiceConfigListOut,
     CustomerServiceConfigBulkUpsertCreate,
     CustomerServiceConfigOut,
+    CustomerServiceTreeOut,
     CustomerServiceConfigUpdate,
     CustomerPricingSummaryResult,
     CustomerServicePurchaseCreate,
@@ -35,12 +36,14 @@ from app.modules.service_catalog.service import (
     CustomerPricingSummaryService,
     CustomerServiceConfigService,
     CustomerServicePurchaseService,
+    CustomerServiceTreeService,
     ServiceCatalogService,
     ServiceGroupService,
     ServiceProjectService,
     get_customer_pricing_summary_service,
     get_customer_service_config_service,
     get_customer_service_purchase_service,
+    get_customer_service_tree_service,
     get_service_catalog_service,
     get_service_group_service,
     get_service_project_service,
@@ -51,6 +54,7 @@ SERVICE_GROUPS_TAG = "service-groups"
 SERVICES_TAG = "services"
 CUSTOMER_SERVICE_CONFIGS_TAG = "customer-service-configs"
 CUSTOMER_SERVICE_PURCHASES_TAG = "customer-service-purchases"
+CUSTOMER_SERVICE_TREE_TAG = "customer-service-tree"
 CUSTOMER_PRICING_TAG = "customer-pricing"
 
 router = APIRouter()
@@ -531,6 +535,34 @@ def deactivate_service(
 ) -> ServiceOut:
     deactivated_service, group, project = service.deactivate(service_id=service_id)
     return mapper.to_service_out(service=deactivated_service, group=group, project=project)
+
+
+@router.get(
+    "/customers/{customer_id}/services/tree",
+    tags=[CUSTOMER_SERVICE_TREE_TAG],
+    response_model=CustomerServiceTreeOut,
+    summary="Get customer service tree",
+    description=(
+        "Return full customer data together with all configured services nested as "
+        "project -> group -> service, including prices, notes, and aggregated totals. "
+        "Accessible by admin users and the owning customer user."
+    ),
+    responses={
+        200: {"description": "Customer service tree returned."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        404: {"description": "Customer not found."},
+    },
+)
+def get_customer_service_tree(
+    customer_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerServiceTreeService = Depends(get_customer_service_tree_service),
+) -> CustomerServiceTreeOut:
+    return service.get_tree(
+        customer_id=customer_id,
+        current_user=current_user,
+    )
 
 
 @router.get(

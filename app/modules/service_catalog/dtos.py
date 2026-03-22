@@ -5,6 +5,7 @@ from pydantic import Field, model_validator
 from app.common.dtos import MongoDTO, WithId
 from app.common.messages import ITEMS_MUST_NOT_BE_EMPTY
 from app.common.pagination import PaginatedResponse
+from app.modules.customers.dtos import CustomerOut
 
 
 class ServiceProjectBase(MongoDTO):
@@ -282,6 +283,64 @@ class CustomerServicePurchaseUpdate(CustomerServicePurchaseBase):
         if self.items is not None and len(self.items) == 0:
             raise ValueError(ITEMS_MUST_NOT_BE_EMPTY)
         return self
+
+
+class CustomerServiceTreeTotalsOut(MongoDTO):
+    configured_service_count: int = Field(..., description="Count of configured services.", examples=[3])
+    enabled_service_count: int = Field(..., description="Count of enabled services.", examples=[2])
+    sale_total: int = Field(..., description="Aggregated sale total.", examples=[12000000])
+    support_total: int = Field(..., description="Aggregated support total.", examples=[3000000])
+    grand_total: int = Field(..., description="Aggregated grand total.", examples=[15000000])
+
+
+class CustomerServiceTreeServiceOut(MongoDTO):
+    config_id: int = Field(..., description="Customer service config id.", examples=[1])
+    customer_id: int = Field(..., description="Customer id.", examples=[1])
+    service_id: int = Field(..., description="Service id.", examples=[10])
+    service_name: str = Field(..., description="Service name.", examples=["Camera Monitoring"])
+    service_description: str | None = Field(
+        default=None,
+        description="Service description.",
+        examples=["Monitoring and surveillance service."],
+    )
+    service_sort_order: int | None = Field(default=None, description="Service sort order.", examples=[10])
+    service_is_active: bool = Field(..., description="Service active status.", examples=[True])
+    is_enabled: bool = Field(..., description="Whether the service is enabled for the customer.", examples=[True])
+    sale_price: int | None = Field(default=None, description="Configured sale price.", examples=[5000000])
+    support_price: int = Field(..., description="Configured support price.", examples=[1500000])
+    notes: str | None = Field(default=None, description="Optional service notes.", examples=["Includes setup."])
+    line_sale_total: int = Field(..., description="Line sale total.", examples=[5000000])
+    line_support_total: int = Field(..., description="Line support total.", examples=[1500000])
+    line_grand_total: int = Field(..., description="Line grand total.", examples=[6500000])
+    config_created_at: datetime = Field(..., description="Customer service config creation timestamp.")
+    config_updated_at: datetime = Field(..., description="Customer service config last update timestamp.")
+    service_created_at: datetime = Field(..., description="Service catalog creation timestamp.")
+    service_updated_at: datetime = Field(..., description="Service catalog last update timestamp.")
+
+
+class CustomerServiceTreeGroupOut(ServiceGroupOut):
+    totals: CustomerServiceTreeTotalsOut = Field(..., description="Aggregated totals for this group.")
+    services: list[CustomerServiceTreeServiceOut] = Field(
+        ...,
+        description="Customer services inside this group.",
+    )
+
+
+class CustomerServiceTreeProjectOut(ServiceProjectOut):
+    totals: CustomerServiceTreeTotalsOut = Field(..., description="Aggregated totals for this project.")
+    groups: list[CustomerServiceTreeGroupOut] = Field(
+        ...,
+        description="Nested service groups for this project.",
+    )
+
+
+class CustomerServiceTreeOut(MongoDTO):
+    customer: CustomerOut = Field(..., description="Full customer information.")
+    projects: list[CustomerServiceTreeProjectOut] = Field(
+        ...,
+        description="Customer services grouped by project and group.",
+    )
+    totals: CustomerServiceTreeTotalsOut = Field(..., description="Overall customer service totals.")
 
 
 class CustomerPricingSummaryCustomer(MongoDTO):
