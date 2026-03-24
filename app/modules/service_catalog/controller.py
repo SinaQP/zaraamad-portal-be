@@ -1,12 +1,19 @@
+from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.common.dtos import CurrentUser
 from app.common.enums import SortOrder
-from app.common.messages import INVALID_JALALI_DATETIME
+from app.common.messages import INVALID_JALALI_DATE
 from app.common.pagination import PaginationParams, get_pagination_params, set_pagination_headers
 from app.common.security.dependencies import get_current_user, require_admin
+from app.common.validators.jalali_datetime import (
+    jalali_date_string_to_gregorian_date,
+    jalali_datetime_string_to_gregorian_date,
+    validate_jalali_date_string,
+    validate_jalali_datetime_string,
+)
 from app.modules.service_catalog.dtos import (
     CustomerServiceConfigListOut,
     CustomerServiceConfigBulkUpsertCreate,
@@ -35,7 +42,6 @@ from app.modules.service_catalog.dtos import (
     ServiceProjectOut,
     ServiceProjectUpdate,
     ServiceUpdate,
-    validate_customer_service_selection_snapshot_datetime_string,
 )
 from app.modules.service_catalog.mappers import ServiceCatalogMapper, get_service_catalog_mapper
 from app.modules.service_catalog.service import (
@@ -69,15 +75,21 @@ CUSTOMER_PRICING_TAG = "customer-pricing"
 router = APIRouter()
 
 
-def _normalize_optional_snapshot_datetime(value: str | None) -> str | None:
+def _normalize_optional_snapshot_date(value: str | None) -> date | None:
     if value is None:
         return None
     try:
-        return validate_customer_service_selection_snapshot_datetime_string(value)
+        normalized_value = value.strip()
+        try:
+            validate_jalali_date_string(normalized_value)
+            return jalali_date_string_to_gregorian_date(normalized_value)
+        except ValueError:
+            validate_jalali_datetime_string(normalized_value)
+            return jalali_datetime_string_to_gregorian_date(normalized_value)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=INVALID_JALALI_DATETIME,
+            detail=INVALID_JALALI_DATE,
         ) from exc
 
 
@@ -924,11 +936,11 @@ def list_customer_service_selection_snapshots(
     user_id: int | None = Query(default=None, description="Filter by creator user id."),
     from_date: str | None = Query(
         default=None,
-        description="Filter date from this string value (inclusive).",
+        description="Filter date from this Jalali date value (inclusive).",
     ),
     to_date: str | None = Query(
         default=None,
-        description="Filter date up to this string value (inclusive).",
+        description="Filter date up to this Jalali date value (inclusive).",
     ),
     sort_by: Literal["id", "user_id", "date"] = Query(
         default="date",
@@ -936,15 +948,15 @@ def list_customer_service_selection_snapshots(
     ),
     sort_order: SortOrder = Query(default=SortOrder.DESC, description="Sort direction."),
     pagination: PaginationParams = Depends(get_pagination_params),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
     service: CustomerServiceSelectionSnapshotService = Depends(get_customer_service_selection_snapshot_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> CustomerServiceSelectionSnapshotListOut:
     snapshots, meta = service.list_by_customer(
         customer_id=customer_id,
         user_id=user_id,
-        from_date=_normalize_optional_snapshot_datetime(from_date),
-        to_date=_normalize_optional_snapshot_datetime(to_date),
+        from_date=_normalize_optional_snapshot_date(from_date),
+        to_date=_normalize_optional_snapshot_date(to_date),
         sort_by=sort_by,
         sort_order=sort_order,
         pagination=pagination,
@@ -1009,7 +1021,7 @@ def create_customer_service_selection_snapshot(
 )
 def get_customer_service_selection_snapshot(
     snapshot_id: int,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
     service: CustomerServiceSelectionSnapshotService = Depends(get_customer_service_selection_snapshot_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
 ) -> CustomerServiceSelectionSnapshotOut:

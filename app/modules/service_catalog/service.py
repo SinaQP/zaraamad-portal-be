@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import Select, delete, func, or_, select
@@ -75,6 +76,10 @@ from app.modules.service_catalog.schemas import (
     ServiceProject,
 )
 from app.modules.users.schemas import User
+
+
+def get_current_snapshot_date() -> date:
+    return date.today()
 
 
 @dataclass
@@ -838,8 +843,8 @@ class CustomerServiceSelectionSnapshotQueryBuilder:
         *,
         customer_id: int,
         user_id: int | None,
-        from_date: str | None,
-        to_date: str | None,
+        from_date: date | None,
+        to_date: date | None,
         sort_by: str,
         sort_order: SortOrder,
     ) -> Select[tuple[CustomerServiceSelectionSnapshot, str, str]]:
@@ -1248,8 +1253,8 @@ class CustomerServiceSelectionSnapshotService:
         *,
         customer_id: int,
         user_id: int | None,
-        from_date: str | None,
-        to_date: str | None,
+        from_date: date | None,
+        to_date: date | None,
         sort_by: str,
         sort_order: SortOrder,
         pagination: PaginationParams,
@@ -1324,7 +1329,7 @@ class CustomerServiceSelectionSnapshotService:
         snapshot = CustomerServiceSelectionSnapshot(
             customer_id=dto.customer_id,
             user_id=target_user.id,
-            selected_at=dto.date,
+            selected_at=get_current_snapshot_date(),
             payload=dto.payload,
         )
         self._db_session.add(snapshot)

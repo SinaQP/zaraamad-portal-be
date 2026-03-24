@@ -1,3 +1,4 @@
+from app.common.validators.jalali_datetime import gregorian_date_to_jalali_date_string
 from app.modules.service_catalog.dtos import (
     CustomerServiceConfigOut,
     CustomerServicePurchaseItemOut,
@@ -201,7 +202,7 @@ class ServiceCatalogMapper:
             customer_name=customer_name,
             user_id=snapshot.user_id,
             user_name=user_name,
-            date=snapshot.selected_at,
+            date=gregorian_date_to_jalali_date_string(snapshot.selected_at),
             payload=snapshot.payload,
         )
 
@@ -213,7 +214,7 @@ class ServiceCatalogMapper:
             id=snapshot.id,
             customer_id=snapshot.customer_id,
             user_id=snapshot.user_id,
-            date=snapshot.selected_at,
+            date=gregorian_date_to_jalali_date_string(snapshot.selected_at),
             payload=snapshot.payload,
         )
 
