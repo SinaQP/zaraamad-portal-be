@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, status
@@ -1300,7 +1299,7 @@ class CustomerServiceSelectionSnapshotService:
             customer_id=customer_id,
             user_id=target_user.id,
             selected_at=dto.selected_at,
-            payload=copy.deepcopy(dto.payload),
+            payload=dto.payload,
         )
         self._db_session.add(snapshot)
         self._commit_with_integrity_guard()

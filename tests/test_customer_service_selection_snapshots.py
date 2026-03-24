@@ -2,8 +2,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
-from app.common.messages import CUSTOMER_ACCESS_DENIED
+from app.common.messages import CUSTOMER_ACCESS_DENIED, INVALID_JALALI_DATETIME
 from app.modules.customers.schemas import Customer
+from app.modules.service_catalog.schemas import CustomerServiceSelectionSnapshot
 from app.modules.users.schemas import User
 
 
@@ -155,7 +156,7 @@ def _create_customer_service_configs(
     return response.json()
 
 
-def test_customer_service_selection_snapshot_create_detail_and_payload_are_preserved(
+def test_customer_service_selection_snapshot_create_detail_and_payload_string_are_preserved(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -208,18 +209,14 @@ def test_customer_service_selection_snapshot_create_detail_and_payload_are_prese
         ],
     )
 
-    original_payload = {
-        "selected_config_ids": [config_rows[0]["id"]],
-        "lines": [
-            {
-                "service_id": service_id,
-                "service_name": "Snapshot Service",
-                "sale_price": 500,
-                "support_price": 50,
-            }
-        ],
-        "totals": {"sale_total": 500, "support_total": 50, "grand_total": 550},
-    }
+    original_payload = (
+        '{  "selected_config_ids" : ['
+        f'{config_rows[0]["id"]}'
+        '], "lines" : [ { "service_id" : '
+        f"{service_id}"
+        ', "service_name" : "Snapshot Service", "sale_price" : 500, "support_price" : 50 } ], '
+        '"totals" : { "sale_total" : 500, "support_total" : 50, "grand_total" : 550 } }'
+    )
     create_response = client.post(
         f"/customers/{customer.id}/service-selection-snapshots",
         headers=customer_headers,
@@ -235,6 +232,10 @@ def test_customer_service_selection_snapshot_create_detail_and_payload_are_prese
     assert create_data["user_id"] == customer_user.id
     assert create_data["selected_at"] == "1405-01-05 10:30:00"
     assert create_data["payload"] == original_payload
+
+    stored_snapshot = db_session.get(CustomerServiceSelectionSnapshot, create_data["id"])
+    assert stored_snapshot is not None
+    assert stored_snapshot.payload == original_payload
 
     update_config_response = client.patch(
         f"/customer-service-configs/{config_rows[0]['id']}",
@@ -254,7 +255,38 @@ def test_customer_service_selection_snapshot_create_detail_and_payload_are_prese
     assert detail_response.status_code == 200
     detail_data = detail_response.json()
     assert detail_data["payload"] == original_payload
-    assert detail_data["payload"]["totals"]["grand_total"] == 550
+
+
+def test_customer_service_selection_snapshot_accepts_unparsed_payload_strings(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    customer = _create_customer_entity(
+        db_session=db_session,
+        name="Unparsed Payload Customer",
+    )
+    customer_user = _create_user(
+        db_session=db_session,
+        full_name="Unparsed Payload User",
+        mobile="09121110006",
+        role=UserRole.CUSTOMER,
+        customer_id=customer.id,
+    )
+    customer_headers = _headers_for_mobile(client=client, mobile=customer_user.mobile)
+
+    raw_payload = "{selected_ids:[10,11],step:final}"
+    response = client.post(
+        f"/customers/{customer.id}/service-selection-snapshots",
+        headers=customer_headers,
+        json={
+            "user_id": customer_user.id,
+            "selected_at": "1405-01-06 12:15:30",
+            "payload": raw_payload,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["payload"] == raw_payload
 
 
 def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pagination(
@@ -282,9 +314,9 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
     )
 
     snapshot_payloads = [
-        (first_user.id, "1405-01-01 08:00:00", {"step": "draft", "selected_ids": [1]}),
-        (second_user.id, "1405-01-02 09:00:00", {"step": "review", "selected_ids": [2]}),
-        (first_user.id, "1405-01-03 10:00:00", {"step": "final", "selected_ids": [3]}),
+        (first_user.id, "1405-01-01 08:00:00", '{"step":"draft","selected_ids":[1]}'),
+        (second_user.id, "1405-01-02 09:00:00", '{"step":"review","selected_ids":[2]}'),
+        (first_user.id, "1405-01-03 10:00:00", '{"step":"final","selected_ids":[3]}'),
     ]
     for user_id, selected_at, payload in snapshot_payloads:
         response = client.post(
@@ -310,7 +342,7 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
     assert first_page_data["total_page"] == 3
     assert len(first_page_data["items"]) == 1
     assert first_page_data["items"][0]["selected_at"] == "1405-01-03 10:00:00"
-    assert first_page_data["items"][0]["payload"]["step"] == "final"
+    assert first_page_data["items"][0]["payload"] == '{"step":"final","selected_ids":[3]}'
 
     filtered_response = client.get(
         f"/customers/{customer.id}/service-selection-snapshots",
@@ -327,6 +359,37 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
     assert len(filtered_data["items"]) == 1
     assert filtered_data["items"][0]["user_id"] == first_user.id
     assert filtered_data["items"][0]["selected_at"] == "1405-01-03 10:00:00"
+
+
+def test_customer_service_selection_snapshot_rejects_non_exact_selected_at_format(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    customer = _create_customer_entity(
+        db_session=db_session,
+        name="Selected At Validation Customer",
+    )
+    customer_user = _create_user(
+        db_session=db_session,
+        full_name="Selected At Validation User",
+        mobile="09121110007",
+        role=UserRole.CUSTOMER,
+        customer_id=customer.id,
+    )
+    customer_headers = _headers_for_mobile(client=client, mobile=customer_user.mobile)
+
+    response = client.post(
+        f"/customers/{customer.id}/service-selection-snapshots",
+        headers=customer_headers,
+        json={
+            "user_id": customer_user.id,
+            "selected_at": "1405-01-06T12:15:30",
+            "payload": '{"selected_ids":[10,11]}',
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == INVALID_JALALI_DATETIME
 
 
 def test_customer_scope_is_enforced_for_service_selection_snapshot_endpoints(
@@ -365,7 +428,7 @@ def test_customer_scope_is_enforced_for_service_selection_snapshot_endpoints(
         json={
             "user_id": customer_one_user.id,
             "selected_at": "1405-01-07 11:00:00",
-            "payload": {"selected_ids": [10, 11], "step": "final"},
+            "payload": '{"selected_ids":[10,11],"step":"final"}',
         },
     )
     assert create_response.status_code == 201

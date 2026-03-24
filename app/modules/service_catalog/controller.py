@@ -7,7 +7,6 @@ from app.common.enums import SortOrder
 from app.common.messages import INVALID_JALALI_DATETIME
 from app.common.pagination import PaginationParams, get_pagination_params, set_pagination_headers
 from app.common.security.dependencies import get_current_user, require_admin
-from app.common.validators.jalali_datetime import validate_jalali_datetime_string
 from app.modules.service_catalog.dtos import (
     CustomerServiceConfigListOut,
     CustomerServiceConfigBulkUpsertCreate,
@@ -35,6 +34,7 @@ from app.modules.service_catalog.dtos import (
     ServiceProjectOut,
     ServiceProjectUpdate,
     ServiceUpdate,
+    validate_customer_service_selection_snapshot_datetime_string,
 )
 from app.modules.service_catalog.mappers import ServiceCatalogMapper, get_service_catalog_mapper
 from app.modules.service_catalog.service import (
@@ -72,7 +72,7 @@ def _normalize_optional_snapshot_datetime(value: str | None) -> str | None:
     if value is None:
         return None
     try:
-        return validate_jalali_datetime_string(value)
+        return validate_customer_service_selection_snapshot_datetime_string(value)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

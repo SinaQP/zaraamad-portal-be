@@ -1,13 +1,25 @@
+import re
 from datetime import datetime
-from typing import Any
 
 from pydantic import Field, field_validator, model_validator
 
 from app.common.dtos import MongoDTO, WithId
 from app.common.messages import ITEMS_MUST_NOT_BE_EMPTY
 from app.common.pagination import PaginatedResponse
-from app.common.validators.jalali_datetime import validate_jalali_datetime_string
 from app.modules.customers.dtos import CustomerOut
+
+_CUSTOMER_SERVICE_SELECTION_SNAPSHOT_DATETIME_ERROR = (
+    "Invalid Jalali datetime format. Use YYYY-MM-DD HH:MM:SS."
+)
+_CUSTOMER_SERVICE_SELECTION_SNAPSHOT_DATETIME_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$"
+)
+
+
+def validate_customer_service_selection_snapshot_datetime_string(value: str) -> str:
+    if _CUSTOMER_SERVICE_SELECTION_SNAPSHOT_DATETIME_PATTERN.fullmatch(value) is None:
+        raise ValueError(_CUSTOMER_SERVICE_SELECTION_SNAPSHOT_DATETIME_ERROR)
+    return value
 
 
 class ServiceProjectBase(MongoDTO):
@@ -294,22 +306,18 @@ class CustomerServiceSelectionSnapshotBase(MongoDTO):
         description="Selection datetime as a Jalali string in YYYY-MM-DD HH:MM:SS format.",
         examples=["1405-01-05 10:30:00"],
     )
-    payload: dict[str, Any] = Field(
+    payload: str = Field(
         ...,
-        description="Complete frontend payload captured as a JSON object.",
+        description="Complete frontend payload captured as the raw string received from the frontend.",
         examples=[
-            {
-                "project_id": 3,
-                "selected_config_ids": [11, 12],
-                "totals": {"sale_total": 1200, "support_total": 50, "grand_total": 1250},
-            }
+            '{"project_id":3,"selected_config_ids":[11,12],"totals":{"sale_total":1200,"support_total":50,"grand_total":1250}}'
         ],
     )
 
     @field_validator("selected_at")
     @classmethod
     def validate_selected_at(cls, value: str) -> str:
-        return validate_jalali_datetime_string(value)
+        return validate_customer_service_selection_snapshot_datetime_string(value)
 
 
 class CustomerServiceSelectionSnapshotCreate(CustomerServiceSelectionSnapshotBase):

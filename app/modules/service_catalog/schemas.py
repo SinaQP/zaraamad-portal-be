@@ -1,7 +1,4 @@
-from typing import Any
-
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, ForeignKey, Integer, JSON, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.database import Base, TimestampMixin
@@ -176,7 +173,4 @@ class CustomerServiceSelectionSnapshot(Base, TimestampMixin):
         index=True,
     )
     selected_at: Mapped[str] = mapped_column(String(19), nullable=False, index=True)
-    payload: Mapped[dict[str, Any]] = mapped_column(
-        JSON().with_variant(JSONB(), "postgresql"),
-        nullable=False,
-    )
+    payload: Mapped[str] = mapped_column(Text(), nullable=False)
