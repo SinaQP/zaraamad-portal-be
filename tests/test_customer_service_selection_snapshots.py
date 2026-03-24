@@ -221,8 +221,9 @@ def test_customer_service_selection_snapshot_create_detail_and_payload_string_ar
         f"/customers/{customer.id}/service-selection-snapshots",
         headers=customer_headers,
         json={
+            "customer_id": customer.id,
             "user_id": customer_user.id,
-            "selected_at": "1405-01-05 10:30:00",
+            "date": "1405-01-05 10:30:00",
             "payload": original_payload,
         },
     )
@@ -230,11 +231,12 @@ def test_customer_service_selection_snapshot_create_detail_and_payload_string_ar
     create_data = create_response.json()
     assert create_data["customer_id"] == customer.id
     assert create_data["user_id"] == customer_user.id
-    assert create_data["selected_at"] == "1405-01-05 10:30:00"
+    assert create_data["date"] == "1405-01-05 10:30:00"
     assert create_data["payload"] == original_payload
 
     stored_snapshot = db_session.get(CustomerServiceSelectionSnapshot, create_data["id"])
     assert stored_snapshot is not None
+    assert stored_snapshot.selected_at == "1405-01-05 10:30:00"
     assert stored_snapshot.payload == original_payload
 
     update_config_response = client.patch(
@@ -254,6 +256,11 @@ def test_customer_service_selection_snapshot_create_detail_and_payload_string_ar
     )
     assert detail_response.status_code == 200
     detail_data = detail_response.json()
+    assert detail_data["customer_id"] == customer.id
+    assert detail_data["customer_name"] == customer.name
+    assert detail_data["user_id"] == customer_user.id
+    assert detail_data["user_name"] == customer_user.full_name
+    assert detail_data["date"] == "1405-01-05 10:30:00"
     assert detail_data["payload"] == original_payload
 
 
@@ -279,8 +286,9 @@ def test_customer_service_selection_snapshot_accepts_unparsed_payload_strings(
         f"/customers/{customer.id}/service-selection-snapshots",
         headers=customer_headers,
         json={
+            "customer_id": customer.id,
             "user_id": customer_user.id,
-            "selected_at": "1405-01-06 12:15:30",
+            "date": "1405-01-06 12:15:30",
             "payload": raw_payload,
         },
     )
@@ -318,13 +326,14 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
         (second_user.id, "1405-01-02 09:00:00", '{"step":"review","selected_ids":[2]}'),
         (first_user.id, "1405-01-03 10:00:00", '{"step":"final","selected_ids":[3]}'),
     ]
-    for user_id, selected_at, payload in snapshot_payloads:
+    for user_id, date, payload in snapshot_payloads:
         response = client.post(
             f"/customers/{customer.id}/service-selection-snapshots",
             headers=admin_headers,
             json={
+                "customer_id": customer.id,
                 "user_id": user_id,
-                "selected_at": selected_at,
+                "date": date,
                 "payload": payload,
             },
         )
@@ -341,7 +350,11 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
     first_page_data = first_page_response.json()
     assert first_page_data["total_page"] == 3
     assert len(first_page_data["items"]) == 1
-    assert first_page_data["items"][0]["selected_at"] == "1405-01-03 10:00:00"
+    assert first_page_data["items"][0]["customer_id"] == customer.id
+    assert first_page_data["items"][0]["customer_name"] == customer.name
+    assert first_page_data["items"][0]["user_id"] == first_user.id
+    assert first_page_data["items"][0]["user_name"] == first_user.full_name
+    assert first_page_data["items"][0]["date"] == "1405-01-03 10:00:00"
     assert first_page_data["items"][0]["payload"] == '{"step":"final","selected_ids":[3]}'
 
     filtered_response = client.get(
@@ -358,10 +371,12 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
     assert filtered_response.headers["X-Total-Count"] == "1"
     assert len(filtered_data["items"]) == 1
     assert filtered_data["items"][0]["user_id"] == first_user.id
-    assert filtered_data["items"][0]["selected_at"] == "1405-01-03 10:00:00"
+    assert filtered_data["items"][0]["user_name"] == first_user.full_name
+    assert filtered_data["items"][0]["customer_name"] == customer.name
+    assert filtered_data["items"][0]["date"] == "1405-01-03 10:00:00"
 
 
-def test_customer_service_selection_snapshot_rejects_non_exact_selected_at_format(
+def test_customer_service_selection_snapshot_rejects_non_exact_date_format(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -382,14 +397,47 @@ def test_customer_service_selection_snapshot_rejects_non_exact_selected_at_forma
         f"/customers/{customer.id}/service-selection-snapshots",
         headers=customer_headers,
         json={
+            "customer_id": customer.id,
             "user_id": customer_user.id,
-            "selected_at": "1405-01-06T12:15:30",
+            "date": "1405-01-06T12:15:30",
             "payload": '{"selected_ids":[10,11]}',
         },
     )
 
     assert response.status_code == 422
     assert response.json()["detail"][0]["msg"] == INVALID_JALALI_DATETIME
+
+
+def test_customer_service_selection_snapshot_requires_all_post_fields(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    customer = _create_customer_entity(
+        db_session=db_session,
+        name="Required Fields Customer",
+    )
+    customer_user = _create_user(
+        db_session=db_session,
+        full_name="Required Fields User",
+        mobile="09121110008",
+        role=UserRole.CUSTOMER,
+        customer_id=customer.id,
+    )
+    customer_headers = _headers_for_mobile(client=client, mobile=customer_user.mobile)
+
+    response = client.post(
+        f"/customers/{customer.id}/service-selection-snapshots",
+        headers=customer_headers,
+        json={},
+    )
+
+    assert response.status_code == 422
+    assert {item["field"] for item in response.json()["detail"]} == {
+        "customer_id",
+        "user_id",
+        "date",
+        "payload",
+    }
 
 
 def test_customer_scope_is_enforced_for_service_selection_snapshot_endpoints(
@@ -426,8 +474,9 @@ def test_customer_scope_is_enforced_for_service_selection_snapshot_endpoints(
         f"/customers/{customer_one.id}/service-selection-snapshots",
         headers=customer_one_headers,
         json={
+            "customer_id": customer_one.id,
             "user_id": customer_one_user.id,
-            "selected_at": "1405-01-07 11:00:00",
+            "date": "1405-01-07 11:00:00",
             "payload": '{"selected_ids":[10,11],"step":"final"}',
         },
     )
@@ -453,3 +502,5 @@ def test_customer_scope_is_enforced_for_service_selection_snapshot_endpoints(
         headers=admin_headers,
     )
     assert admin_detail_response.status_code == 200
+    assert admin_detail_response.json()["customer_name"] == customer_one.name
+    assert admin_detail_response.json()["user_name"] == customer_one_user.full_name

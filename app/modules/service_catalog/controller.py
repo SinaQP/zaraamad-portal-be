@@ -12,6 +12,7 @@ from app.modules.service_catalog.dtos import (
     CustomerServiceConfigBulkUpsertCreate,
     CustomerServiceConfigOut,
     CustomerServiceSelectionSnapshotCreate,
+    CustomerServiceSelectionSnapshotCreateOut,
     CustomerServiceSelectionSnapshotListOut,
     CustomerServiceSelectionSnapshotOut,
     CustomerServiceTreeOut,
@@ -923,14 +924,14 @@ def list_customer_service_selection_snapshots(
     user_id: int | None = Query(default=None, description="Filter by creator user id."),
     from_date: str | None = Query(
         default=None,
-        description="Filter selected_at from this Jalali datetime string (inclusive).",
+        description="Filter date from this string value (inclusive).",
     ),
     to_date: str | None = Query(
         default=None,
-        description="Filter selected_at up to this Jalali datetime string (inclusive).",
+        description="Filter date up to this string value (inclusive).",
     ),
-    sort_by: Literal["id", "user_id", "selected_at", "created_at", "updated_at"] = Query(
-        default="selected_at",
+    sort_by: Literal["id", "user_id", "date"] = Query(
+        default="date",
         description="Sort field.",
     ),
     sort_order: SortOrder = Query(default=SortOrder.DESC, description="Sort direction."),
@@ -952,7 +953,11 @@ def list_customer_service_selection_snapshots(
     set_pagination_headers(response=response, meta=meta)
     return CustomerServiceSelectionSnapshotListOut(
         items=[
-            mapper.to_customer_service_selection_snapshot_out(snapshot=item)
+            mapper.to_customer_service_selection_snapshot_out(
+                snapshot=item.snapshot,
+                customer_name=item.customer_name,
+                user_name=item.user_name,
+            )
             for item in snapshots
         ],
         total_page=meta.total_pages,
@@ -962,7 +967,7 @@ def list_customer_service_selection_snapshots(
 @router.post(
     "/customers/{customer_id}/service-selection-snapshots",
     tags=[CUSTOMER_SERVICE_SELECTION_SNAPSHOTS_TAG],
-    response_model=CustomerServiceSelectionSnapshotOut,
+    response_model=CustomerServiceSelectionSnapshotCreateOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create customer service selection snapshot",
     description="Store the final frontend payload snapshot for a customer selection. Accessible by admin users and the owning customer user.",
@@ -980,13 +985,13 @@ def create_customer_service_selection_snapshot(
     current_user: CurrentUser = Depends(get_current_user),
     service: CustomerServiceSelectionSnapshotService = Depends(get_customer_service_selection_snapshot_service),
     mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
-) -> CustomerServiceSelectionSnapshotOut:
+) -> CustomerServiceSelectionSnapshotCreateOut:
     snapshot = service.create(
-        customer_id=customer_id,
+        path_customer_id=customer_id,
         dto=payload,
         current_user=current_user,
     )
-    return mapper.to_customer_service_selection_snapshot_out(snapshot=snapshot)
+    return mapper.to_customer_service_selection_snapshot_create_out(snapshot=snapshot)
 
 
 @router.get(
@@ -1012,7 +1017,11 @@ def get_customer_service_selection_snapshot(
         snapshot_id=snapshot_id,
         current_user=current_user,
     )
-    return mapper.to_customer_service_selection_snapshot_out(snapshot=snapshot)
+    return mapper.to_customer_service_selection_snapshot_out(
+        snapshot=snapshot.snapshot,
+        customer_name=snapshot.customer_name,
+        user_name=snapshot.user_name,
+    )
 
 
 @router.get(

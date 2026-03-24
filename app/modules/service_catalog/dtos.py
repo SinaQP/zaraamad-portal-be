@@ -300,10 +300,11 @@ class CustomerServicePurchaseUpdate(CustomerServicePurchaseBase):
 
 
 class CustomerServiceSelectionSnapshotBase(MongoDTO):
+    customer_id: int = Field(..., description="Customer id.", examples=[1])
     user_id: int = Field(..., description="User id that registered this snapshot.", examples=[7])
-    selected_at: str = Field(
+    date: str = Field(
         ...,
-        description="Selection datetime as a Jalali string in YYYY-MM-DD HH:MM:SS format.",
+        description="Snapshot date as a string in YYYY-MM-DD HH:MM:SS format.",
         examples=["1405-01-05 10:30:00"],
     )
     payload: str = Field(
@@ -314,9 +315,9 @@ class CustomerServiceSelectionSnapshotBase(MongoDTO):
         ],
     )
 
-    @field_validator("selected_at")
+    @field_validator("date")
     @classmethod
-    def validate_selected_at(cls, value: str) -> str:
+    def validate_date(cls, value: str) -> str:
         return validate_customer_service_selection_snapshot_datetime_string(value)
 
 
@@ -324,10 +325,13 @@ class CustomerServiceSelectionSnapshotCreate(CustomerServiceSelectionSnapshotBas
     pass
 
 
+class CustomerServiceSelectionSnapshotCreateOut(WithId, CustomerServiceSelectionSnapshotBase):
+    pass
+
+
 class CustomerServiceSelectionSnapshotOut(WithId, CustomerServiceSelectionSnapshotBase):
-    customer_id: int = Field(..., description="Customer id.", examples=[1])
-    created_at: datetime = Field(..., description="Creation timestamp.")
-    updated_at: datetime = Field(..., description="Last update timestamp.")
+    customer_name: str = Field(..., description="Customer name.", examples=["Snapshot Customer"])
+    user_name: str = Field(..., description="User display name.", examples=["Snapshot User"])
 
 
 class CustomerServiceSelectionSnapshotListOut(PaginatedResponse[CustomerServiceSelectionSnapshotOut]):

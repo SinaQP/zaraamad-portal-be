@@ -12,6 +12,7 @@ from app.common.dtos import CurrentUser
 from app.common.enums import SortOrder, UserRole
 from app.common.messages import (
     CUSTOMER_ACCESS_DENIED,
+    CUSTOMER_ID_INVALID_OR_INACTIVE,
     CUSTOMER_NOT_FOUND,
     CUSTOMER_SERVICE_CONFIG_IN_USE,
     CUSTOMER_SERVICE_CONFIG_NOT_FOUND,
@@ -86,6 +87,13 @@ class ProjectHierarchyGroup:
 class ProjectHierarchy:
     project: ServiceProject
     groups: list[ProjectHierarchyGroup]
+
+
+@dataclass
+class CustomerServiceSelectionSnapshotView:
+    snapshot: CustomerServiceSelectionSnapshot
+    customer_name: str
+    user_name: str
 
 
 class CustomerLookupService:
@@ -822,9 +830,7 @@ class CustomerServiceSelectionSnapshotQueryBuilder:
     SORT_COLUMNS = {
         "id": CustomerServiceSelectionSnapshot.id,
         "user_id": CustomerServiceSelectionSnapshot.user_id,
-        "selected_at": CustomerServiceSelectionSnapshot.selected_at,
-        "created_at": CustomerServiceSelectionSnapshot.created_at,
-        "updated_at": CustomerServiceSelectionSnapshot.updated_at,
+        "date": CustomerServiceSelectionSnapshot.selected_at,
     }
 
     def build_list_query(
@@ -836,9 +842,16 @@ class CustomerServiceSelectionSnapshotQueryBuilder:
         to_date: str | None,
         sort_by: str,
         sort_order: SortOrder,
-    ) -> Select[tuple[CustomerServiceSelectionSnapshot]]:
-        query = select(CustomerServiceSelectionSnapshot).where(
-            CustomerServiceSelectionSnapshot.customer_id == customer_id
+    ) -> Select[tuple[CustomerServiceSelectionSnapshot, str, str]]:
+        query = (
+            select(
+                CustomerServiceSelectionSnapshot,
+                Customer.name,
+                User.full_name,
+            )
+            .join(Customer, Customer.id == CustomerServiceSelectionSnapshot.customer_id)
+            .join(User, User.id == CustomerServiceSelectionSnapshot.user_id)
+            .where(CustomerServiceSelectionSnapshot.customer_id == customer_id)
         )
         if user_id is not None:
             query = query.where(CustomerServiceSelectionSnapshot.user_id == user_id)
@@ -1241,7 +1254,7 @@ class CustomerServiceSelectionSnapshotService:
         sort_order: SortOrder,
         pagination: PaginationParams,
         current_user: CurrentUser,
-    ) -> tuple[list[CustomerServiceSelectionSnapshot], PaginationMeta]:
+    ) -> tuple[list[CustomerServiceSelectionSnapshotView], PaginationMeta]:
         self._customer_lookup_service.get_active_or_404(customer_id=customer_id)
         self._access_policy.validate_customer_access(
             current_user=current_user,
@@ -1266,7 +1279,15 @@ class CustomerServiceSelectionSnapshotService:
             ) or 0
         )
         paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
-        items = list(self._db_session.scalars(paginated_query).all())
+        rows = self._db_session.execute(paginated_query).all()
+        items = [
+            CustomerServiceSelectionSnapshotView(
+                snapshot=row[0],
+                customer_name=row[1],
+                user_name=row[2],
+            )
+            for row in rows
+        ]
         meta = PaginationMeta(
             total_count=total_count,
             page=pagination.page,
@@ -1277,18 +1298,23 @@ class CustomerServiceSelectionSnapshotService:
     def create(
         self,
         *,
-        customer_id: int,
+        path_customer_id: int,
         dto: CustomerServiceSelectionSnapshotCreate,
         current_user: CurrentUser,
     ) -> CustomerServiceSelectionSnapshot:
-        self._customer_lookup_service.get_active_or_404(customer_id=customer_id)
+        if dto.customer_id != path_customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=CUSTOMER_ID_INVALID_OR_INACTIVE,
+            )
+        self._customer_lookup_service.get_active_or_404(customer_id=dto.customer_id)
         self._access_policy.validate_customer_access(
             current_user=current_user,
-            customer_id=customer_id,
+            customer_id=dto.customer_id,
         )
         target_user = self._user_lookup_service.get_active_for_customer_snapshot_or_422(
             user_id=dto.user_id,
-            customer_id=customer_id,
+            customer_id=dto.customer_id,
         )
         if current_user.role != UserRole.ADMIN and target_user.id != current_user.id:
             raise HTTPException(
@@ -1296,9 +1322,9 @@ class CustomerServiceSelectionSnapshotService:
                 detail=USER_ID_INVALID,
             )
         snapshot = CustomerServiceSelectionSnapshot(
-            customer_id=customer_id,
+            customer_id=dto.customer_id,
             user_id=target_user.id,
-            selected_at=dto.selected_at,
+            selected_at=dto.date,
             payload=dto.payload,
         )
         self._db_session.add(snapshot)
@@ -1311,27 +1337,40 @@ class CustomerServiceSelectionSnapshotService:
         *,
         snapshot_id: int,
         current_user: CurrentUser,
-    ) -> CustomerServiceSelectionSnapshot:
-        snapshot = self._get_snapshot_or_404(snapshot_id=snapshot_id)
-        self._customer_lookup_service.get_active_or_404(customer_id=snapshot.customer_id)
+    ) -> CustomerServiceSelectionSnapshotView:
+        snapshot = self._get_snapshot_view_or_404(snapshot_id=snapshot_id)
+        self._customer_lookup_service.get_active_or_404(customer_id=snapshot.snapshot.customer_id)
         self._access_policy.validate_customer_access(
             current_user=current_user,
-            customer_id=snapshot.customer_id,
+            customer_id=snapshot.snapshot.customer_id,
         )
         return snapshot
 
-    def _get_snapshot_or_404(
+    def _get_snapshot_view_or_404(
         self,
         *,
         snapshot_id: int,
-    ) -> CustomerServiceSelectionSnapshot:
-        snapshot = self._db_session.get(CustomerServiceSelectionSnapshot, snapshot_id)
-        if snapshot is None:
+    ) -> CustomerServiceSelectionSnapshotView:
+        row = self._db_session.execute(
+            select(
+                CustomerServiceSelectionSnapshot,
+                Customer.name,
+                User.full_name,
+            )
+            .join(Customer, Customer.id == CustomerServiceSelectionSnapshot.customer_id)
+            .join(User, User.id == CustomerServiceSelectionSnapshot.user_id)
+            .where(CustomerServiceSelectionSnapshot.id == snapshot_id)
+        ).first()
+        if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=CUSTOMER_SERVICE_SELECTION_SNAPSHOT_NOT_FOUND,
             )
-        return snapshot
+        return CustomerServiceSelectionSnapshotView(
+            snapshot=row[0],
+            customer_name=row[1],
+            user_name=row[2],
+        )
 
     def _commit_with_integrity_guard(self) -> None:
         try:
