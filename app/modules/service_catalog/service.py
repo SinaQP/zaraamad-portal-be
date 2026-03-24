@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, status
@@ -18,6 +19,7 @@ from app.common.messages import (
     CUSTOMER_SERVICE_CONFIG_NOT_PURCHASABLE,
     CUSTOMER_SERVICE_CONFIG_SELECTION_INVALID,
     CUSTOMER_SERVICE_PURCHASE_NOT_FOUND,
+    CUSTOMER_SERVICE_SELECTION_SNAPSHOT_NOT_FOUND,
     DATA_INTEGRITY_ERROR,
     DUPLICATE_CUSTOMER_SERVICE_PURCHASE_SELECTION,
     DUPLICATE_CUSTOMER_SERVICE_CONFIGURATION,
@@ -32,6 +34,7 @@ from app.common.messages import (
     SERVICE_NOT_FOUND,
     SERVICE_PROJECT_NOT_FOUND,
     SUPPORT_PRICE_CANNOT_BE_NULL,
+    USER_ID_INVALID,
 )
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.modules.service_catalog.dtos import (
@@ -46,6 +49,7 @@ from app.modules.service_catalog.dtos import (
     CustomerServiceConfigUpdate,
     CustomerServicePurchaseCreate,
     CustomerServicePurchaseItemCreate,
+    CustomerServiceSelectionSnapshotCreate,
     CustomerServiceTreeGroupOut,
     CustomerServiceTreeOut,
     CustomerServiceTreeProjectOut,
@@ -65,10 +69,12 @@ from app.modules.service_catalog.schemas import (
     CustomerServiceConfig,
     CustomerServicePurchase,
     CustomerServicePurchaseItem,
+    CustomerServiceSelectionSnapshot,
     Service,
     ServiceGroup,
     ServiceProject,
 )
+from app.modules.users.schemas import User
 
 
 @dataclass
@@ -129,6 +135,30 @@ class CustomerLookupService:
             "name": customer_row["name"],
             "grade": customer_row["grade"],
         }
+
+
+class UserLookupService:
+    def __init__(self, db_session: Session) -> None:
+        self._db_session = db_session
+
+    def get_active_for_customer_snapshot_or_422(
+        self,
+        *,
+        user_id: int,
+        customer_id: int,
+    ) -> User:
+        user = self._db_session.get(User, user_id)
+        if user is None or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=USER_ID_INVALID,
+            )
+        if user.role == UserRole.CUSTOMER and user.customer_id != customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=USER_ID_INVALID,
+            )
+        return user
 
 
 class ServiceProjectQueryBuilder:
@@ -789,6 +819,48 @@ class CustomerServicePurchaseQueryBuilder:
         return query
 
 
+class CustomerServiceSelectionSnapshotQueryBuilder:
+    SORT_COLUMNS = {
+        "id": CustomerServiceSelectionSnapshot.id,
+        "user_id": CustomerServiceSelectionSnapshot.user_id,
+        "selected_at": CustomerServiceSelectionSnapshot.selected_at,
+        "created_at": CustomerServiceSelectionSnapshot.created_at,
+        "updated_at": CustomerServiceSelectionSnapshot.updated_at,
+    }
+
+    def build_list_query(
+        self,
+        *,
+        customer_id: int,
+        user_id: int | None,
+        from_date: str | None,
+        to_date: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+    ) -> Select[tuple[CustomerServiceSelectionSnapshot]]:
+        query = select(CustomerServiceSelectionSnapshot).where(
+            CustomerServiceSelectionSnapshot.customer_id == customer_id
+        )
+        if user_id is not None:
+            query = query.where(CustomerServiceSelectionSnapshot.user_id == user_id)
+        if from_date is not None:
+            query = query.where(CustomerServiceSelectionSnapshot.selected_at >= from_date)
+        if to_date is not None:
+            query = query.where(CustomerServiceSelectionSnapshot.selected_at <= to_date)
+        sort_column = self.SORT_COLUMNS[sort_by]
+        if sort_order == SortOrder.DESC:
+            query = query.order_by(
+                sort_column.desc(),
+                CustomerServiceSelectionSnapshot.id.desc(),
+            )
+        else:
+            query = query.order_by(
+                sort_column.asc(),
+                CustomerServiceSelectionSnapshot.id.asc(),
+            )
+        return query
+
+
 class CustomerServicePurchaseSelectionPolicy:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
@@ -1151,6 +1223,128 @@ class CustomerServicePurchaseService:
             ) from exc
 
 
+class CustomerServiceSelectionSnapshotService:
+    def __init__(self, db_session: Session) -> None:
+        self._db_session = db_session
+        self._customer_lookup_service = CustomerLookupService(db_session=db_session)
+        self._user_lookup_service = UserLookupService(db_session=db_session)
+        self._access_policy = CustomerScopedAccessPolicy()
+        self._query_builder = CustomerServiceSelectionSnapshotQueryBuilder()
+
+    def list_by_customer(
+        self,
+        *,
+        customer_id: int,
+        user_id: int | None,
+        from_date: str | None,
+        to_date: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+        pagination: PaginationParams,
+        current_user: CurrentUser,
+    ) -> tuple[list[CustomerServiceSelectionSnapshot], PaginationMeta]:
+        self._customer_lookup_service.get_active_or_404(customer_id=customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=customer_id,
+        )
+        if user_id is not None:
+            self._user_lookup_service.get_active_for_customer_snapshot_or_422(
+                user_id=user_id,
+                customer_id=customer_id,
+            )
+        query = self._query_builder.build_list_query(
+            customer_id=customer_id,
+            user_id=user_id,
+            from_date=from_date,
+            to_date=to_date,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total_count = int(
+            self._db_session.scalar(
+                select(func.count()).select_from(query.order_by(None).subquery())
+            ) or 0
+        )
+        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
+        items = list(self._db_session.scalars(paginated_query).all())
+        meta = PaginationMeta(
+            total_count=total_count,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
+        return items, meta
+
+    def create(
+        self,
+        *,
+        customer_id: int,
+        dto: CustomerServiceSelectionSnapshotCreate,
+        current_user: CurrentUser,
+    ) -> CustomerServiceSelectionSnapshot:
+        self._customer_lookup_service.get_active_or_404(customer_id=customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=customer_id,
+        )
+        target_user = self._user_lookup_service.get_active_for_customer_snapshot_or_422(
+            user_id=dto.user_id,
+            customer_id=customer_id,
+        )
+        if current_user.role != UserRole.ADMIN and target_user.id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=USER_ID_INVALID,
+            )
+        snapshot = CustomerServiceSelectionSnapshot(
+            customer_id=customer_id,
+            user_id=target_user.id,
+            selected_at=dto.selected_at,
+            payload=copy.deepcopy(dto.payload),
+        )
+        self._db_session.add(snapshot)
+        self._commit_with_integrity_guard()
+        self._db_session.refresh(snapshot)
+        return snapshot
+
+    def get_by_id(
+        self,
+        *,
+        snapshot_id: int,
+        current_user: CurrentUser,
+    ) -> CustomerServiceSelectionSnapshot:
+        snapshot = self._get_snapshot_or_404(snapshot_id=snapshot_id)
+        self._customer_lookup_service.get_active_or_404(customer_id=snapshot.customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=snapshot.customer_id,
+        )
+        return snapshot
+
+    def _get_snapshot_or_404(
+        self,
+        *,
+        snapshot_id: int,
+    ) -> CustomerServiceSelectionSnapshot:
+        snapshot = self._db_session.get(CustomerServiceSelectionSnapshot, snapshot_id)
+        if snapshot is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=CUSTOMER_SERVICE_SELECTION_SNAPSHOT_NOT_FOUND,
+            )
+        return snapshot
+
+    def _commit_with_integrity_guard(self) -> None:
+        try:
+            self._db_session.commit()
+        except IntegrityError as exc:
+            self._db_session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=DATA_INTEGRITY_ERROR,
+            ) from exc
+
+
 class CustomerServiceTreeService:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
@@ -1455,6 +1649,12 @@ def get_customer_service_purchase_service(
     db_session: Session = Depends(get_db_session),
 ) -> CustomerServicePurchaseService:
     return CustomerServicePurchaseService(db_session=db_session)
+
+
+def get_customer_service_selection_snapshot_service(
+    db_session: Session = Depends(get_db_session),
+) -> CustomerServiceSelectionSnapshotService:
+    return CustomerServiceSelectionSnapshotService(db_session=db_session)
 
 
 def get_customer_service_tree_service(

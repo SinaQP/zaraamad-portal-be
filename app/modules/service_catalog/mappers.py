@@ -2,6 +2,7 @@ from app.modules.service_catalog.dtos import (
     CustomerServiceConfigOut,
     CustomerServicePurchaseItemOut,
     CustomerServicePurchaseOut,
+    CustomerServiceSelectionSnapshotOut,
     ServiceGroupInfo,
     ServiceGroupOut,
     ServiceOut,
@@ -15,6 +16,7 @@ from app.modules.service_catalog.schemas import (
     CustomerServiceConfig,
     CustomerServicePurchase,
     CustomerServicePurchaseItem,
+    CustomerServiceSelectionSnapshot,
     Service,
     ServiceGroup,
     ServiceProject,
@@ -183,6 +185,20 @@ class ServiceCatalogMapper:
             ],
             created_at=purchase.created_at,
             updated_at=purchase.updated_at,
+        )
+
+    def to_customer_service_selection_snapshot_out(
+        self,
+        snapshot: CustomerServiceSelectionSnapshot,
+    ) -> CustomerServiceSelectionSnapshotOut:
+        return CustomerServiceSelectionSnapshotOut(
+            id=snapshot.id,
+            customer_id=snapshot.customer_id,
+            user_id=snapshot.user_id,
+            selected_at=snapshot.selected_at,
+            payload=snapshot.payload,
+            created_at=snapshot.created_at,
+            updated_at=snapshot.updated_at,
         )
 
 

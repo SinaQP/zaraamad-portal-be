@@ -33,6 +33,7 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.USER_NOT_FOUND: "Requested user record was not found.",
     messages.USER_INACTIVE: "Requested user is inactive.",
     messages.USER_NOT_FOUND_OR_INACTIVE: "Active user record for the provided identifier was not found.",
+    messages.USER_ID_INVALID: "The supplied user_id does not exist, is inactive, or is invalid for this request.",
     messages.INVALID_CREDENTIALS: "Mobile/password combination did not match an active user.",
     messages.MOBILE_ALREADY_EXISTS: "Unique constraint on user mobile was violated.",
     messages.OTP_DELIVERY_FAILED: "OTP delivery provider failed.",
@@ -75,6 +76,9 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
         "The customer service config cannot be deleted because purchase history references it."
     ),
     messages.CUSTOMER_SERVICE_PURCHASE_NOT_FOUND: "Requested customer service purchase record was not found.",
+    messages.CUSTOMER_SERVICE_SELECTION_SNAPSHOT_NOT_FOUND: (
+        "Requested customer service selection snapshot record was not found."
+    ),
     messages.CUSTOMER_SERVICE_CONFIG_SELECTION_INVALID: (
         "At least one selected customer_service_config_id was invalid for this customer."
     ),

@@ -1,10 +1,12 @@
 from datetime import datetime
+from typing import Any
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.common.dtos import MongoDTO, WithId
 from app.common.messages import ITEMS_MUST_NOT_BE_EMPTY
 from app.common.pagination import PaginatedResponse
+from app.common.validators.jalali_datetime import validate_jalali_datetime_string
 from app.modules.customers.dtos import CustomerOut
 
 
@@ -283,6 +285,45 @@ class CustomerServicePurchaseUpdate(CustomerServicePurchaseBase):
         if self.items is not None and len(self.items) == 0:
             raise ValueError(ITEMS_MUST_NOT_BE_EMPTY)
         return self
+
+
+class CustomerServiceSelectionSnapshotBase(MongoDTO):
+    user_id: int = Field(..., description="User id that registered this snapshot.", examples=[7])
+    selected_at: str = Field(
+        ...,
+        description="Selection datetime as a Jalali string in YYYY-MM-DD HH:MM:SS format.",
+        examples=["1405-01-05 10:30:00"],
+    )
+    payload: dict[str, Any] = Field(
+        ...,
+        description="Complete frontend payload captured as a JSON object.",
+        examples=[
+            {
+                "project_id": 3,
+                "selected_config_ids": [11, 12],
+                "totals": {"sale_total": 1200, "support_total": 50, "grand_total": 1250},
+            }
+        ],
+    )
+
+    @field_validator("selected_at")
+    @classmethod
+    def validate_selected_at(cls, value: str) -> str:
+        return validate_jalali_datetime_string(value)
+
+
+class CustomerServiceSelectionSnapshotCreate(CustomerServiceSelectionSnapshotBase):
+    pass
+
+
+class CustomerServiceSelectionSnapshotOut(WithId, CustomerServiceSelectionSnapshotBase):
+    customer_id: int = Field(..., description="Customer id.", examples=[1])
+    created_at: datetime = Field(..., description="Creation timestamp.")
+    updated_at: datetime = Field(..., description="Last update timestamp.")
+
+
+class CustomerServiceSelectionSnapshotListOut(PaginatedResponse[CustomerServiceSelectionSnapshotOut]):
+    pass
 
 
 class CustomerServiceTreeTotalsOut(MongoDTO):

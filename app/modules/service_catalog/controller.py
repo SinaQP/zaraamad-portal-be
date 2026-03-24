@@ -1,15 +1,20 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.common.dtos import CurrentUser
 from app.common.enums import SortOrder
+from app.common.messages import INVALID_JALALI_DATETIME
 from app.common.pagination import PaginationParams, get_pagination_params, set_pagination_headers
 from app.common.security.dependencies import get_current_user, require_admin
+from app.common.validators.jalali_datetime import validate_jalali_datetime_string
 from app.modules.service_catalog.dtos import (
     CustomerServiceConfigListOut,
     CustomerServiceConfigBulkUpsertCreate,
     CustomerServiceConfigOut,
+    CustomerServiceSelectionSnapshotCreate,
+    CustomerServiceSelectionSnapshotListOut,
+    CustomerServiceSelectionSnapshotOut,
     CustomerServiceTreeOut,
     CustomerServiceConfigUpdate,
     CustomerPricingSummaryResult,
@@ -36,6 +41,7 @@ from app.modules.service_catalog.service import (
     CustomerPricingSummaryService,
     CustomerServiceConfigService,
     CustomerServicePurchaseService,
+    CustomerServiceSelectionSnapshotService,
     CustomerServiceTreeService,
     ServiceCatalogService,
     ServiceGroupService,
@@ -43,6 +49,7 @@ from app.modules.service_catalog.service import (
     get_customer_pricing_summary_service,
     get_customer_service_config_service,
     get_customer_service_purchase_service,
+    get_customer_service_selection_snapshot_service,
     get_customer_service_tree_service,
     get_service_catalog_service,
     get_service_group_service,
@@ -54,10 +61,23 @@ SERVICE_GROUPS_TAG = "service-groups"
 SERVICES_TAG = "services"
 CUSTOMER_SERVICE_CONFIGS_TAG = "customer-service-configs"
 CUSTOMER_SERVICE_PURCHASES_TAG = "customer-service-purchases"
+CUSTOMER_SERVICE_SELECTION_SNAPSHOTS_TAG = "customer-service-selection-snapshots"
 CUSTOMER_SERVICE_TREE_TAG = "customer-service-tree"
 CUSTOMER_PRICING_TAG = "customer-pricing"
 
 router = APIRouter()
+
+
+def _normalize_optional_snapshot_datetime(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        return validate_jalali_datetime_string(value)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=INVALID_JALALI_DATETIME,
+        ) from exc
 
 
 @router.post(
@@ -881,6 +901,118 @@ def deactivate_customer_service_purchase(
         purchase=purchase.purchase,
         items=purchase.items,
     )
+
+
+@router.get(
+    "/customers/{customer_id}/service-selection-snapshots",
+    tags=[CUSTOMER_SERVICE_SELECTION_SNAPSHOTS_TAG],
+    response_model=CustomerServiceSelectionSnapshotListOut,
+    summary="List customer service selection snapshots",
+    description="Return stored frontend payload snapshots for a customer. Accessible by admin users and the owning customer user.",
+    responses={
+        200: {"description": "Customer service selection snapshots returned."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        404: {"description": "Customer not found."},
+        422: {"description": "Query validation failed."},
+    },
+)
+def list_customer_service_selection_snapshots(
+    response: Response,
+    customer_id: int,
+    user_id: int | None = Query(default=None, description="Filter by creator user id."),
+    from_date: str | None = Query(
+        default=None,
+        description="Filter selected_at from this Jalali datetime string (inclusive).",
+    ),
+    to_date: str | None = Query(
+        default=None,
+        description="Filter selected_at up to this Jalali datetime string (inclusive).",
+    ),
+    sort_by: Literal["id", "user_id", "selected_at", "created_at", "updated_at"] = Query(
+        default="selected_at",
+        description="Sort field.",
+    ),
+    sort_order: SortOrder = Query(default=SortOrder.DESC, description="Sort direction."),
+    pagination: PaginationParams = Depends(get_pagination_params),
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerServiceSelectionSnapshotService = Depends(get_customer_service_selection_snapshot_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> CustomerServiceSelectionSnapshotListOut:
+    snapshots, meta = service.list_by_customer(
+        customer_id=customer_id,
+        user_id=user_id,
+        from_date=_normalize_optional_snapshot_datetime(from_date),
+        to_date=_normalize_optional_snapshot_datetime(to_date),
+        sort_by=sort_by,
+        sort_order=sort_order,
+        pagination=pagination,
+        current_user=current_user,
+    )
+    set_pagination_headers(response=response, meta=meta)
+    return CustomerServiceSelectionSnapshotListOut(
+        items=[
+            mapper.to_customer_service_selection_snapshot_out(snapshot=item)
+            for item in snapshots
+        ],
+        total_page=meta.total_pages,
+    )
+
+
+@router.post(
+    "/customers/{customer_id}/service-selection-snapshots",
+    tags=[CUSTOMER_SERVICE_SELECTION_SNAPSHOTS_TAG],
+    response_model=CustomerServiceSelectionSnapshotOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create customer service selection snapshot",
+    description="Store the final frontend payload snapshot for a customer selection. Accessible by admin users and the owning customer user.",
+    responses={
+        201: {"description": "Customer service selection snapshot created."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        404: {"description": "Customer not found."},
+        422: {"description": "Payload validation failed."},
+    },
+)
+def create_customer_service_selection_snapshot(
+    customer_id: int,
+    payload: CustomerServiceSelectionSnapshotCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerServiceSelectionSnapshotService = Depends(get_customer_service_selection_snapshot_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> CustomerServiceSelectionSnapshotOut:
+    snapshot = service.create(
+        customer_id=customer_id,
+        dto=payload,
+        current_user=current_user,
+    )
+    return mapper.to_customer_service_selection_snapshot_out(snapshot=snapshot)
+
+
+@router.get(
+    "/customer-service-selection-snapshots/{snapshot_id}",
+    tags=[CUSTOMER_SERVICE_SELECTION_SNAPSHOTS_TAG],
+    response_model=CustomerServiceSelectionSnapshotOut,
+    summary="Get customer service selection snapshot",
+    description="Return a stored customer service selection snapshot by id. Accessible by admin users and the owning customer user.",
+    responses={
+        200: {"description": "Customer service selection snapshot returned."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        404: {"description": "Customer service selection snapshot not found."},
+    },
+)
+def get_customer_service_selection_snapshot(
+    snapshot_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerServiceSelectionSnapshotService = Depends(get_customer_service_selection_snapshot_service),
+    mapper: ServiceCatalogMapper = Depends(get_service_catalog_mapper),
+) -> CustomerServiceSelectionSnapshotOut:
+    snapshot = service.get_by_id(
+        snapshot_id=snapshot_id,
+        current_user=current_user,
+    )
+    return mapper.to_customer_service_selection_snapshot_out(snapshot=snapshot)
 
 
 @router.get(
