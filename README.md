@@ -332,6 +332,8 @@ Pagination metadata is returned in response headers:
 - customer service purchases store the selected `customer_service_config_id` rows as purchase snapshots
 - purchase totals are persisted from the selected config prices at the time of create/update
 - disabled or inactive customer service configs cannot be selected in a purchase
+- selected response timestamps are returned as Jalali datetime strings for `feedback.created_at`, `customers.updated_at`, and `customer-service-configs.updated_at`
+- customer service selection snapshot responses return Jalali `date` plus snapshot `time` in `HH:MM:SS` format
 - customer bridge subscription management resolves the configured `bridge_base_url` and `bridge_api_key` from the requested customer
 - subscription bridge date fields use Jalali datetime strings in `YYYY-MM-DD HH:MM:SS` format
 

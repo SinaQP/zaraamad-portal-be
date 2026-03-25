@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
+from app.common.formatters.jalali_datetime import gregorian_datetime_to_jalali_datetime_string
 from app.common.messages import (
     ADMIN_ACCESS_REQUIRED,
     FEEDBACK_CONTENT_REQUIRED,
@@ -9,6 +10,7 @@ from app.common.messages import (
     VALIDATION_ERROR_MESSAGE,
 )
 from app.modules.customers.schemas import Customer
+from app.modules.feedback.schemas import Feedback
 from app.modules.users.schemas import User
 
 
@@ -110,6 +112,9 @@ def test_customer_user_can_create_feedback_and_admin_can_list_it(
     assert create_data["user_mobile"] == customer_user.mobile
     assert create_data["message"] == "Need faster onboarding guides."
     assert create_data["selected_options"] == ["Fast support", "Analytics"]
+    stored_feedback = db_session.get(Feedback, create_data["id"])
+    assert stored_feedback is not None
+    assert create_data["created_at"] == gregorian_datetime_to_jalali_datetime_string(stored_feedback.created_at)
 
     list_response = client.get(
         "/feedback",
@@ -121,6 +126,9 @@ def test_customer_user_can_create_feedback_and_admin_can_list_it(
     list_data = list_response.json()
     assert list_data["items"][0]["user_id"] == customer_user.id
     assert list_data["items"][0]["selected_options"] == ["Fast support", "Analytics"]
+    assert list_data["items"][0]["created_at"] == gregorian_datetime_to_jalali_datetime_string(
+        stored_feedback.created_at
+    )
 
     forbidden_response = client.get(
         "/feedback",

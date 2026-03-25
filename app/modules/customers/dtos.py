@@ -8,6 +8,7 @@ from pydantic import Field, field_validator, model_validator
 from app.common.dtos import MongoDTO, WithId
 from app.common.messages import ITEMS_MUST_NOT_BE_EMPTY
 from app.common.pagination import PaginatedResponse
+from app.common.validators.jalali_datetime import validate_jalali_datetime_string
 
 CUSTOMER_INCOME_MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
@@ -47,7 +48,16 @@ class CustomerCreate(CustomerBase):
 class CustomerOut(WithId, CustomerBase):
     is_active: bool = Field(..., description="Customer active status.", examples=[True])
     created_at: datetime = Field(..., description="Creation timestamp.")
-    updated_at: datetime = Field(..., description="Last update timestamp.")
+    updated_at: str = Field(
+        ...,
+        description="Last update timestamp as a Jalali datetime string in YYYY-MM-DD HH:MM:SS format.",
+        examples=["1405-01-05 14:35:22"],
+    )
+
+    @field_validator("updated_at")
+    @classmethod
+    def validate_updated_at(cls, value: str) -> str:
+        return validate_jalali_datetime_string(value)
 
 
 class CustomerListOut(PaginatedResponse[CustomerOut]):

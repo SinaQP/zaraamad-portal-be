@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
+from app.common.formatters.jalali_datetime import gregorian_datetime_to_jalali_datetime_string
 from app.common.messages import (
     ADMIN_ACCESS_REQUIRED,
     CUSTOMER_ACCESS_DENIED,
@@ -12,6 +13,7 @@ from app.common.messages import (
     VALIDATION_ERROR_MESSAGE,
 )
 from app.modules.customers.schemas import Customer
+from app.modules.service_catalog.schemas import CustomerServiceConfig
 from app.modules.users.schemas import User
 
 
@@ -862,6 +864,11 @@ def test_create_customer_service_config_and_list(
     assert upsert_data[0]["group_id"] == group_id
     assert upsert_data[0]["sale_price"] == 4000000
     assert upsert_data[0]["support_price"] == 800000
+    stored_config = db_session.get(CustomerServiceConfig, upsert_data[0]["id"])
+    assert stored_config is not None
+    assert upsert_data[0]["updated_at"] == gregorian_datetime_to_jalali_datetime_string(
+        stored_config.updated_at
+    )
 
     list_response = client.get(f"/customers/{customer.id}/services", headers=headers)
     assert list_response.status_code == 200
@@ -870,6 +877,9 @@ def test_create_customer_service_config_and_list(
     assert len(list_data["items"]) == 1
     assert list_data["items"][0]["project_name"] == "Security Project"
     assert list_data["items"][0]["group_name"] == "Security"
+    assert list_data["items"][0]["updated_at"] == gregorian_datetime_to_jalali_datetime_string(
+        stored_config.updated_at
+    )
 
 
 def test_customer_service_list_supports_filter_search_sort_and_pagination(

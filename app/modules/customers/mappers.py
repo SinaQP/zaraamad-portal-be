@@ -1,4 +1,5 @@
 from app.common.services.bridge_client import BridgeCapabilitiesResult, BridgeHealthResult
+from app.common.formatters.jalali_datetime import gregorian_datetime_to_jalali_datetime_string
 from app.modules.customers.dtos import (
     CustomerBridgeCapabilitiesOut,
     CustomerBridgeCapabilityBase,
@@ -32,7 +33,7 @@ class CustomerMapper:
             grade=customer.grade,
             is_active=customer.is_active,
             created_at=customer.created_at,
-            updated_at=customer.updated_at,
+            updated_at=gregorian_datetime_to_jalali_datetime_string(customer.updated_at),
         )
 
     def to_bridge_config_out(

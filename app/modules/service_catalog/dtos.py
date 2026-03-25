@@ -5,7 +5,7 @@ from pydantic import Field, field_validator, model_validator
 from app.common.dtos import MongoDTO, WithId
 from app.common.messages import ITEMS_MUST_NOT_BE_EMPTY
 from app.common.pagination import PaginatedResponse
-from app.common.validators.jalali_datetime import validate_jalali_date_string
+from app.common.validators.jalali_datetime import validate_jalali_date_string, validate_jalali_datetime_string
 from app.modules.customers.dtos import CustomerOut
 
 
@@ -168,7 +168,16 @@ class CustomerServiceConfigOut(WithId, CustomerServiceConfigBase):
     service_name: str = Field(..., description="Service name.", examples=["Camera Monitoring"])
     service_is_active: bool = Field(..., description="Service active status.", examples=[True])
     created_at: datetime = Field(..., description="Creation timestamp.")
-    updated_at: datetime = Field(..., description="Last update timestamp.")
+    updated_at: str = Field(
+        ...,
+        description="Last update timestamp as a Jalali datetime string in YYYY-MM-DD HH:MM:SS format.",
+        examples=["1405-01-05 14:35:22"],
+    )
+
+    @field_validator("updated_at")
+    @classmethod
+    def validate_updated_at(cls, value: str) -> str:
+        return validate_jalali_datetime_string(value)
 
 
 class CustomerServiceConfigListOut(PaginatedResponse[CustomerServiceConfigOut]):
@@ -290,6 +299,15 @@ def validate_customer_service_selection_snapshot_date_string(value: str) -> str:
     return validate_jalali_date_string(value)
 
 
+def validate_customer_service_selection_snapshot_time_string(value: str) -> str:
+    normalized_value = value.strip()
+    try:
+        datetime.strptime(normalized_value, "%H:%M:%S")
+    except ValueError as exc:
+        raise ValueError("Invalid snapshot time format. Use HH:MM:SS.") from exc
+    return normalized_value
+
+
 class CustomerServiceSelectionSnapshotCreate(MongoDTO):
     customer_id: int = Field(..., description="Customer id.", examples=[1])
     user_id: int = Field(..., description="User id that registered this snapshot.", examples=[7])
@@ -307,8 +325,13 @@ class CustomerServiceSelectionSnapshotOutBase(MongoDTO):
     user_id: int = Field(..., description="User id that registered this snapshot.", examples=[7])
     date: str = Field(
         ...,
-        description="Snapshot date as a Jalali date string in YYYY-MM-DD format.",
+        description="Snapshot selected date as a Jalali date string in YYYY-MM-DD format.",
         examples=["1405-01-05"],
+    )
+    time: str = Field(
+        ...,
+        description="Snapshot storage time in HH:MM:SS format.",
+        examples=["14:35:22"],
     )
     payload: str = Field(
         ...,
@@ -322,6 +345,11 @@ class CustomerServiceSelectionSnapshotOutBase(MongoDTO):
     @classmethod
     def validate_date(cls, value: str) -> str:
         return validate_customer_service_selection_snapshot_date_string(value)
+
+    @field_validator("time")
+    @classmethod
+    def validate_time(cls, value: str) -> str:
+        return validate_customer_service_selection_snapshot_time_string(value)
 
 
 class CustomerServiceSelectionSnapshotCreateOut(WithId, CustomerServiceSelectionSnapshotOutBase):

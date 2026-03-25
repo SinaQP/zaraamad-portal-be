@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.common.database import Base, get_db_session
 from app.common.dtos import CurrentUser
 from app.common.enums import SortOrder, UserRole
+from app.common.formatters.jalali_datetime import gregorian_datetime_to_jalali_datetime_string
 from app.common.messages import (
     CUSTOMER_ACCESS_DENIED,
     CUSTOMER_ID_INVALID_OR_INACTIVE,
@@ -1528,7 +1529,7 @@ class CustomerServiceTreeService:
                 grade=customer.grade,
                 is_active=customer.is_active,
                 created_at=customer.created_at,
-                updated_at=customer.updated_at,
+                updated_at=gregorian_datetime_to_jalali_datetime_string(customer.updated_at),
             ),
             projects=project_nodes,
             totals=overall_totals,

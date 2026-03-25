@@ -1,9 +1,10 @@
-from datetime import date
+from datetime import date, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
+from app.common.formatters.jalali_datetime import gregorian_datetime_to_time_string
 from app.common.messages import ADMIN_ACCESS_REQUIRED, CUSTOMER_ACCESS_DENIED
 from app.modules.service_catalog import service as service_catalog_service_module
 from app.modules.customers.schemas import Customer
@@ -100,6 +101,21 @@ def _set_snapshot_selected_at(
     snapshot = db_session.get(CustomerServiceSelectionSnapshot, snapshot_id)
     assert snapshot is not None
     snapshot.selected_at = selected_at
+    db_session.commit()
+    db_session.refresh(snapshot)
+    return snapshot
+
+
+def _set_snapshot_created_at(
+    db_session: Session,
+    *,
+    snapshot_id: int,
+    created_at: datetime,
+) -> CustomerServiceSelectionSnapshot:
+    snapshot = db_session.get(CustomerServiceSelectionSnapshot, snapshot_id)
+    assert snapshot is not None
+    snapshot.created_at = created_at
+    snapshot.updated_at = created_at
     db_session.commit()
     db_session.refresh(snapshot)
     return snapshot
@@ -267,6 +283,7 @@ def test_customer_service_selection_snapshot_create_detail_and_payload_string_ar
     stored_snapshot = db_session.get(CustomerServiceSelectionSnapshot, create_data["id"])
     assert stored_snapshot is not None
     assert stored_snapshot.selected_at == date(2026, 3, 25)
+    assert create_data["time"] == gregorian_datetime_to_time_string(stored_snapshot.created_at)
     assert stored_snapshot.payload == original_payload
 
     update_config_response = client.patch(
@@ -291,6 +308,7 @@ def test_customer_service_selection_snapshot_create_detail_and_payload_string_ar
     assert detail_data["user_id"] == customer_user.id
     assert detail_data["user_name"] == customer_user.full_name
     assert detail_data["date"] == "1405-01-05"
+    assert detail_data["time"] == gregorian_datetime_to_time_string(stored_snapshot.created_at)
     assert detail_data["payload"] == original_payload
 
 
@@ -353,11 +371,32 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
     )
 
     snapshot_payloads = [
-        (first_user.id, date(2026, 3, 21), '{"step":"draft","selected_ids":[1]}', "1405-01-01"),
-        (second_user.id, date(2026, 3, 22), '{"step":"review","selected_ids":[2]}', "1405-01-02"),
-        (first_user.id, date(2026, 3, 23), '{"step":"final","selected_ids":[3]}', "1405-01-03"),
+        (
+            first_user.id,
+            date(2026, 3, 21),
+            datetime(2026, 3, 21, 8, 15, 0),
+            '{"step":"draft","selected_ids":[1]}',
+            "1405-01-01",
+            "08:15:00",
+        ),
+        (
+            second_user.id,
+            date(2026, 3, 22),
+            datetime(2026, 3, 22, 9, 30, 45),
+            '{"step":"review","selected_ids":[2]}',
+            "1405-01-02",
+            "09:30:45",
+        ),
+        (
+            first_user.id,
+            date(2026, 3, 23),
+            datetime(2026, 3, 23, 10, 45, 12),
+            '{"step":"final","selected_ids":[3]}',
+            "1405-01-03",
+            "10:45:12",
+        ),
     ]
-    for user_id, selected_at, payload, _jalali_date in snapshot_payloads:
+    for user_id, selected_at, created_at, payload, _jalali_date, _time in snapshot_payloads:
         response = client.post(
             f"/customers/{customer.id}/service-selection-snapshots",
             headers=admin_headers,
@@ -372,6 +411,11 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
             db_session=db_session,
             snapshot_id=response.json()["id"],
             selected_at=selected_at,
+        )
+        _set_snapshot_created_at(
+            db_session=db_session,
+            snapshot_id=response.json()["id"],
+            created_at=created_at,
         )
 
     first_page_response = client.get(
@@ -390,6 +434,7 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
     assert first_page_data["items"][0]["user_id"] == first_user.id
     assert first_page_data["items"][0]["user_name"] == first_user.full_name
     assert first_page_data["items"][0]["date"] == "1405-01-03"
+    assert first_page_data["items"][0]["time"] == "10:45:12"
     assert first_page_data["items"][0]["payload"] == '{"step":"final","selected_ids":[3]}'
 
     filtered_response = client.get(
@@ -409,6 +454,7 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
     assert filtered_data["items"][0]["user_name"] == first_user.full_name
     assert filtered_data["items"][0]["customer_name"] == customer.name
     assert filtered_data["items"][0]["date"] == "1405-01-03"
+    assert filtered_data["items"][0]["time"] == "10:45:12"
 
 
 def test_customer_service_selection_snapshot_requires_all_post_fields(

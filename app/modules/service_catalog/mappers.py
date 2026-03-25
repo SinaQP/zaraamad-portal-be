@@ -1,4 +1,8 @@
-from app.common.validators.jalali_datetime import gregorian_date_to_jalali_date_string
+from app.common.formatters.jalali_datetime import (
+    gregorian_date_to_jalali_date_string,
+    gregorian_datetime_to_jalali_datetime_string,
+    gregorian_datetime_to_time_string,
+)
 from app.modules.service_catalog.dtos import (
     CustomerServiceConfigOut,
     CustomerServicePurchaseItemOut,
@@ -138,7 +142,7 @@ class ServiceCatalogMapper:
             support_price=config.support_price,
             notes=config.notes,
             created_at=config.created_at,
-            updated_at=config.updated_at,
+            updated_at=gregorian_datetime_to_jalali_datetime_string(config.updated_at),
         )
 
     def to_customer_service_purchase_item_out(
@@ -203,6 +207,7 @@ class ServiceCatalogMapper:
             user_id=snapshot.user_id,
             user_name=user_name,
             date=gregorian_date_to_jalali_date_string(snapshot.selected_at),
+            time=gregorian_datetime_to_time_string(snapshot.created_at),
             payload=snapshot.payload,
         )
 
@@ -215,6 +220,7 @@ class ServiceCatalogMapper:
             customer_id=snapshot.customer_id,
             user_id=snapshot.user_id,
             date=gregorian_date_to_jalali_date_string(snapshot.selected_at),
+            time=gregorian_datetime_to_time_string(snapshot.created_at),
             payload=snapshot.payload,
         )
 

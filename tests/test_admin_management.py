@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
+from app.common.formatters.jalali_datetime import gregorian_datetime_to_jalali_datetime_string
 from app.common.messages import (
     ADMIN_ACCESS_REQUIRED,
     CUSTOMER_ID_REQUIRED,
@@ -53,6 +54,11 @@ def test_admin_can_manage_customers_and_users(client: TestClient, db_session: Se
     assert customer_response.status_code == 201
     customer_id = customer_response.json()["id"]
     assert customer_response.json()["manager_name"] == "Ali Rezaei"
+    customer_record = db_session.get(Customer, customer_id)
+    assert customer_record is not None
+    assert customer_response.json()["updated_at"] == gregorian_datetime_to_jalali_datetime_string(
+        customer_record.updated_at
+    )
 
     user_response = client.post(
         "/users",
@@ -97,6 +103,10 @@ def test_admin_can_manage_customers_and_users(client: TestClient, db_session: Se
     )
     assert update_customer_response.status_code == 200
     assert update_customer_response.json()["manager_name"] == "Sara Ahmadi"
+    db_session.refresh(customer_record)
+    assert update_customer_response.json()["updated_at"] == gregorian_datetime_to_jalali_datetime_string(
+        customer_record.updated_at
+    )
 
     deactivate_user_response = client.delete(f"/users/{user_id}", headers=admin_headers)
     assert deactivate_user_response.status_code == 200
@@ -256,6 +266,11 @@ def test_customers_list_supports_search_sort_and_pagination(
     assert len(search_items["items"]) == 1
     assert search_items["items"][0]["name"] == "Beta Customer"
     assert search_items["items"][0]["manager_name"] == "Manager Two"
+    matching_customer = db_session.get(Customer, search_items["items"][0]["id"])
+    assert matching_customer is not None
+    assert search_items["items"][0]["updated_at"] == gregorian_datetime_to_jalali_datetime_string(
+        matching_customer.updated_at
+    )
     assert search_response.headers["X-Total-Count"] == "1"
 
     paged_response = client.get(
