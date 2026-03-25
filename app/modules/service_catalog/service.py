@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import Select, delete, func, or_, select
@@ -79,8 +79,16 @@ from app.modules.service_catalog.schemas import (
 from app.modules.users.schemas import User
 
 
-def get_current_snapshot_date() -> date:
-    return date.today()
+def get_current_snapshot_datetime() -> datetime:
+    return datetime.now().replace(microsecond=0)
+
+
+def _snapshot_day_start(value: date) -> datetime:
+    return datetime.combine(value, time.min)
+
+
+def _snapshot_next_day_start(value: date) -> datetime:
+    return datetime.combine(value + timedelta(days=1), time.min)
 
 
 @dataclass
@@ -862,9 +870,9 @@ class CustomerServiceSelectionSnapshotQueryBuilder:
         if user_id is not None:
             query = query.where(CustomerServiceSelectionSnapshot.user_id == user_id)
         if from_date is not None:
-            query = query.where(CustomerServiceSelectionSnapshot.selected_at >= from_date)
+            query = query.where(CustomerServiceSelectionSnapshot.selected_at >= _snapshot_day_start(from_date))
         if to_date is not None:
-            query = query.where(CustomerServiceSelectionSnapshot.selected_at <= to_date)
+            query = query.where(CustomerServiceSelectionSnapshot.selected_at < _snapshot_next_day_start(to_date))
         sort_column = self.SORT_COLUMNS[sort_by]
         if sort_order == SortOrder.DESC:
             query = query.order_by(
@@ -1327,10 +1335,13 @@ class CustomerServiceSelectionSnapshotService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=USER_ID_INVALID,
             )
+        snapshot_timestamp = get_current_snapshot_datetime()
         snapshot = CustomerServiceSelectionSnapshot(
             customer_id=dto.customer_id,
             user_id=target_user.id,
-            selected_at=get_current_snapshot_date(),
+            selected_at=snapshot_timestamp,
+            created_at=snapshot_timestamp,
+            updated_at=snapshot_timestamp,
             payload=dto.payload,
         )
         self._db_session.add(snapshot)

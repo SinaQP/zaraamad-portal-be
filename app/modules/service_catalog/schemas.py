@@ -1,6 +1,6 @@
-from datetime import date
+from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.database import Base, TimestampMixin
@@ -174,5 +174,5 @@ class CustomerServiceSelectionSnapshot(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    selected_at: Mapped[date] = mapped_column(Date(), nullable=False, index=True)
+    selected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     payload: Mapped[str] = mapped_column(Text(), nullable=False)

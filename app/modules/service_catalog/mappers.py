@@ -206,8 +206,8 @@ class ServiceCatalogMapper:
             customer_name=customer_name,
             user_id=snapshot.user_id,
             user_name=user_name,
-            date=gregorian_date_to_jalali_date_string(snapshot.selected_at),
-            time=gregorian_datetime_to_time_string(snapshot.created_at),
+            date=gregorian_date_to_jalali_date_string(snapshot.selected_at.date()),
+            time=gregorian_datetime_to_time_string(snapshot.selected_at),
             payload=snapshot.payload,
         )
 
@@ -219,8 +219,8 @@ class ServiceCatalogMapper:
             id=snapshot.id,
             customer_id=snapshot.customer_id,
             user_id=snapshot.user_id,
-            date=gregorian_date_to_jalali_date_string(snapshot.selected_at),
-            time=gregorian_datetime_to_time_string(snapshot.created_at),
+            date=gregorian_date_to_jalali_date_string(snapshot.selected_at.date()),
+            time=gregorian_datetime_to_time_string(snapshot.selected_at),
             payload=snapshot.payload,
         )
 

@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -80,14 +80,14 @@ def _admin_headers(client: TestClient, db_session: Session) -> dict[str, str]:
     return _headers_for_mobile(client=client, mobile=admin.mobile)
 
 
-def _freeze_snapshot_date(
+def _freeze_snapshot_datetime(
     monkeypatch,
     *,
-    selected_at: date,
+    selected_at: datetime,
 ) -> None:
     monkeypatch.setattr(
         service_catalog_service_module,
-        "get_current_snapshot_date",
+        "get_current_snapshot_datetime",
         lambda: selected_at,
     )
 
@@ -96,7 +96,7 @@ def _set_snapshot_selected_at(
     db_session: Session,
     *,
     snapshot_id: int,
-    selected_at: date,
+    selected_at: datetime,
 ) -> CustomerServiceSelectionSnapshot:
     snapshot = db_session.get(CustomerServiceSelectionSnapshot, snapshot_id)
     assert snapshot is not None
@@ -206,7 +206,8 @@ def test_customer_service_selection_snapshot_create_detail_and_payload_string_ar
     db_session: Session,
     monkeypatch,
 ) -> None:
-    _freeze_snapshot_date(monkeypatch, selected_at=date(2026, 3, 25))
+    frozen_snapshot_at = datetime(2026, 3, 25, 14, 35, 22)
+    _freeze_snapshot_datetime(monkeypatch, selected_at=frozen_snapshot_at)
     admin_headers = _admin_headers(client=client, db_session=db_session)
     customer = _create_customer_entity(
         db_session=db_session,
@@ -282,8 +283,8 @@ def test_customer_service_selection_snapshot_create_detail_and_payload_string_ar
 
     stored_snapshot = db_session.get(CustomerServiceSelectionSnapshot, create_data["id"])
     assert stored_snapshot is not None
-    assert stored_snapshot.selected_at == date(2026, 3, 25)
-    assert create_data["time"] == gregorian_datetime_to_time_string(stored_snapshot.created_at)
+    assert stored_snapshot.selected_at == frozen_snapshot_at
+    assert create_data["time"] == gregorian_datetime_to_time_string(stored_snapshot.selected_at)
     assert stored_snapshot.payload == original_payload
 
     update_config_response = client.patch(
@@ -308,7 +309,7 @@ def test_customer_service_selection_snapshot_create_detail_and_payload_string_ar
     assert detail_data["user_id"] == customer_user.id
     assert detail_data["user_name"] == customer_user.full_name
     assert detail_data["date"] == "1405-01-05"
-    assert detail_data["time"] == gregorian_datetime_to_time_string(stored_snapshot.created_at)
+    assert detail_data["time"] == gregorian_datetime_to_time_string(stored_snapshot.selected_at)
     assert detail_data["payload"] == original_payload
 
 
@@ -317,7 +318,7 @@ def test_customer_service_selection_snapshot_accepts_unparsed_payload_strings(
     db_session: Session,
     monkeypatch,
 ) -> None:
-    _freeze_snapshot_date(monkeypatch, selected_at=date(2026, 3, 26))
+    _freeze_snapshot_datetime(monkeypatch, selected_at=datetime(2026, 3, 26, 9, 5, 1))
     customer = _create_customer_entity(
         db_session=db_session,
         name="Unparsed Payload Customer",
@@ -373,7 +374,7 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
     snapshot_payloads = [
         (
             first_user.id,
-            date(2026, 3, 21),
+            datetime(2026, 3, 21, 8, 15, 0),
             datetime(2026, 3, 21, 8, 15, 0),
             '{"step":"draft","selected_ids":[1]}',
             "1405-01-01",
@@ -381,7 +382,7 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
         ),
         (
             second_user.id,
-            date(2026, 3, 22),
+            datetime(2026, 3, 22, 9, 30, 45),
             datetime(2026, 3, 22, 9, 30, 45),
             '{"step":"review","selected_ids":[2]}',
             "1405-01-02",
@@ -389,7 +390,7 @@ def test_admin_can_list_customer_service_selection_snapshots_with_filters_and_pa
         ),
         (
             first_user.id,
-            date(2026, 3, 23),
+            datetime(2026, 3, 23, 10, 45, 12),
             datetime(2026, 3, 23, 10, 45, 12),
             '{"step":"final","selected_ids":[3]}',
             "1405-01-03",
@@ -493,7 +494,7 @@ def test_customer_can_post_snapshot_but_get_endpoints_are_admin_only(
     db_session: Session,
     monkeypatch,
 ) -> None:
-    _freeze_snapshot_date(monkeypatch, selected_at=date(2026, 3, 27))
+    _freeze_snapshot_datetime(monkeypatch, selected_at=datetime(2026, 3, 27, 16, 20, 0))
     admin_headers = _admin_headers(client=client, db_session=db_session)
     customer_one = _create_customer_entity(
         db_session=db_session,
