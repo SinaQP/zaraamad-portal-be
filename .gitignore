@@ -15,4 +15,5 @@ dist/
 .ruff_cache/
 .idea/
 .vscode/
-docs/db_export/
+docs/db_export/*.xlsx
+docs/db_export/*.csv
