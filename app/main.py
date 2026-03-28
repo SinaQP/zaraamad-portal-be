@@ -61,6 +61,14 @@ OPENAPI_TAGS = [
         "description": "Customer-selected service purchase CRUD endpoints with stored totals.",
     },
     {
+        "name": "customer-service-selection-snapshots",
+        "description": "Stored frontend payload snapshot endpoints for final customer service selections.",
+    },
+    {
+        "name": "customer-service-tree",
+        "description": "Hierarchical customer service overview endpoints.",
+    },
+    {
         "name": "customer-pricing",
         "description": "Customer pricing summary endpoints.",
     },

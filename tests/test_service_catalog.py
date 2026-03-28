@@ -2,8 +2,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
+from app.common.formatters.jalali_datetime import gregorian_datetime_to_jalali_datetime_string
 from app.common.messages import (
     ADMIN_ACCESS_REQUIRED,
+    CUSTOMER_ACCESS_DENIED,
     CUSTOMER_SERVICE_CONFIG_IN_USE,
     DUPLICATE_SERVICE_ID_IN_PAYLOAD,
     MISSING_AUTH_TOKEN,
@@ -11,6 +13,7 @@ from app.common.messages import (
     VALIDATION_ERROR_MESSAGE,
 )
 from app.modules.customers.schemas import Customer
+from app.modules.service_catalog.schemas import CustomerServiceConfig
 from app.modules.users.schemas import User
 
 
@@ -861,6 +864,11 @@ def test_create_customer_service_config_and_list(
     assert upsert_data[0]["group_id"] == group_id
     assert upsert_data[0]["sale_price"] == 4000000
     assert upsert_data[0]["support_price"] == 800000
+    stored_config = db_session.get(CustomerServiceConfig, upsert_data[0]["id"])
+    assert stored_config is not None
+    assert upsert_data[0]["updated_at"] == gregorian_datetime_to_jalali_datetime_string(
+        stored_config.updated_at
+    )
 
     list_response = client.get(f"/customers/{customer.id}/services", headers=headers)
     assert list_response.status_code == 200
@@ -869,6 +877,9 @@ def test_create_customer_service_config_and_list(
     assert len(list_data["items"]) == 1
     assert list_data["items"][0]["project_name"] == "Security Project"
     assert list_data["items"][0]["group_name"] == "Security"
+    assert list_data["items"][0]["updated_at"] == gregorian_datetime_to_jalali_datetime_string(
+        stored_config.updated_at
+    )
 
 
 def test_customer_service_list_supports_filter_search_sort_and_pagination(
@@ -1630,6 +1641,222 @@ def test_pricing_summary_returns_grouped_totals_and_ignores_disabled(
     infra_items = {item["service_name"]: item for item in group_map["Infrastructure"]["items"]}
     assert infra_items["Fiber"]["support_price"] == 0
     assert infra_items["Fiber"]["line_support_total"] == 0
+
+
+def test_customer_service_tree_returns_nested_full_customer_data_for_admin_and_customer(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin_headers = _admin_headers(client=client, db_session=db_session)
+    customer = Customer(
+        name="Tree Customer",
+        manager_name="Tree Manager",
+        grade=2,
+        is_active=True,
+    )
+    db_session.add(customer)
+    db_session.commit()
+    db_session.refresh(customer)
+
+    customer_user = _create_customer_user(db_session=db_session, customer_id=customer.id)
+    customer_headers = {
+        "Authorization": f"Bearer {_login(client=client, mobile=customer_user.mobile)}",
+    }
+
+    security_project_id = _create_service_project(
+        client=client,
+        headers=admin_headers,
+        name="Security Project",
+        sort_order=1,
+    )
+    infra_project_id = _create_service_project(
+        client=client,
+        headers=admin_headers,
+        name="Infrastructure Project",
+        sort_order=2,
+    )
+    security_group_id = _create_service_group(
+        client=client,
+        headers=admin_headers,
+        name="Security Group",
+        sort_order=1,
+    )
+    infra_group_id = _create_service_group(
+        client=client,
+        headers=admin_headers,
+        name="Infrastructure Group",
+        sort_order=1,
+    )
+
+    camera_service_id = _create_service(
+        client=client,
+        headers=admin_headers,
+        project_id=security_project_id,
+        group_id=security_group_id,
+        name="Camera Monitoring",
+        sort_order=1,
+    )
+    guard_service_id = _create_service(
+        client=client,
+        headers=admin_headers,
+        project_id=security_project_id,
+        group_id=security_group_id,
+        name="Guard Patrol",
+        sort_order=2,
+    )
+    fiber_service_id = _create_service(
+        client=client,
+        headers=admin_headers,
+        project_id=infra_project_id,
+        group_id=infra_group_id,
+        name="Fiber Upgrade",
+        sort_order=1,
+    )
+
+    upsert_response = client.put(
+        f"/customers/{customer.id}/services",
+        headers=admin_headers,
+        json={
+            "items": [
+                {
+                    "service_id": camera_service_id,
+                    "is_enabled": True,
+                    "sale_price": 100,
+                    "support_price": 20,
+                    "notes": "Primary camera package",
+                },
+                {
+                    "service_id": guard_service_id,
+                    "is_enabled": False,
+                    "sale_price": 200,
+                    "support_price": 30,
+                    "notes": "Disabled guard package",
+                },
+                {
+                    "service_id": fiber_service_id,
+                    "is_enabled": True,
+                    "sale_price": 300,
+                    "support_price": 50,
+                    "notes": "Fiber package",
+                },
+            ]
+        },
+    )
+    assert upsert_response.status_code == 200
+
+    customer_response = client.get(
+        f"/customers/{customer.id}/services/tree",
+        headers=customer_headers,
+    )
+    assert customer_response.status_code == 200
+    data = customer_response.json()
+
+    assert data["customer"] == {
+        "id": customer.id,
+        "name": "Tree Customer",
+        "manager_name": "Tree Manager",
+        "grade": 2,
+        "is_active": True,
+        "created_at": data["customer"]["created_at"],
+        "updated_at": data["customer"]["updated_at"],
+    }
+    assert data["totals"] == {
+        "configured_service_count": 3,
+        "enabled_service_count": 2,
+        "sale_total": 400,
+        "support_total": 70,
+        "grand_total": 470,
+    }
+
+    assert [project["name"] for project in data["projects"]] == [
+        "Security Project",
+        "Infrastructure Project",
+    ]
+
+    security_project = data["projects"][0]
+    assert security_project["totals"] == {
+        "configured_service_count": 2,
+        "enabled_service_count": 1,
+        "sale_total": 100,
+        "support_total": 20,
+        "grand_total": 120,
+    }
+    assert len(security_project["groups"]) == 1
+    security_group = security_project["groups"][0]
+    assert security_group["name"] == "Security Group"
+    assert security_group["totals"] == security_project["totals"]
+
+    security_services = {
+        item["service_name"]: item
+        for item in security_group["services"]
+    }
+    assert list(security_services.keys()) == [
+        "Camera Monitoring",
+        "Guard Patrol",
+    ]
+    assert security_services["Camera Monitoring"]["service_description"] == "Camera Monitoring description"
+    assert security_services["Camera Monitoring"]["service_sort_order"] == 1
+    assert security_services["Camera Monitoring"]["is_enabled"] is True
+    assert security_services["Camera Monitoring"]["sale_price"] == 100
+    assert security_services["Camera Monitoring"]["support_price"] == 20
+    assert security_services["Camera Monitoring"]["notes"] == "Primary camera package"
+    assert security_services["Camera Monitoring"]["line_sale_total"] == 100
+    assert security_services["Camera Monitoring"]["line_support_total"] == 20
+    assert security_services["Camera Monitoring"]["line_grand_total"] == 120
+    assert "config_created_at" in security_services["Camera Monitoring"]
+    assert "service_created_at" in security_services["Camera Monitoring"]
+
+    assert security_services["Guard Patrol"]["is_enabled"] is False
+    assert security_services["Guard Patrol"]["line_sale_total"] == 0
+    assert security_services["Guard Patrol"]["line_support_total"] == 0
+    assert security_services["Guard Patrol"]["line_grand_total"] == 0
+
+    infra_project = data["projects"][1]
+    assert infra_project["totals"] == {
+        "configured_service_count": 1,
+        "enabled_service_count": 1,
+        "sale_total": 300,
+        "support_total": 50,
+        "grand_total": 350,
+    }
+    infra_services = infra_project["groups"][0]["services"]
+    assert len(infra_services) == 1
+    assert infra_services[0]["service_name"] == "Fiber Upgrade"
+    assert infra_services[0]["line_grand_total"] == 350
+
+    admin_response = client.get(
+        f"/customers/{customer.id}/services/tree",
+        headers=admin_headers,
+    )
+    assert admin_response.status_code == 200
+    assert admin_response.json()["totals"] == data["totals"]
+
+
+def test_customer_service_tree_enforces_customer_scope(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    customer_one = _create_customer_entity(db_session=db_session)
+    customer_two = Customer(
+        name="Second Customer",
+        grade=1,
+        is_active=True,
+    )
+    db_session.add(customer_two)
+    db_session.commit()
+    db_session.refresh(customer_two)
+
+    customer_two_user = _create_customer_user(db_session=db_session, customer_id=customer_two.id)
+    customer_two_headers = {
+        "Authorization": f"Bearer {_login(client=client, mobile=customer_two_user.mobile)}",
+    }
+
+    response = client.get(
+        f"/customers/{customer_one.id}/services/tree",
+        headers=customer_two_headers,
+    )
+    assert response.status_code == 403
+    assert response.json()["message"] == CUSTOMER_ACCESS_DENIED
 
 
 def test_admin_only_access_enforced_and_customer_access_denied(

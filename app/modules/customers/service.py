@@ -102,6 +102,34 @@ class CustomerQueryBuilder:
             query = query.order_by(sort_column.asc(), Customer.id.asc())
         return query
 
+    def build_without_income_query(
+        self,
+        *,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+    ) -> Select[tuple[Customer]]:
+        query = (
+            select(Customer)
+            .outerjoin(CustomerIncomeSummary, CustomerIncomeSummary.customer_id == Customer.id)
+            .where(Customer.is_active.is_(True))
+            .where(CustomerIncomeSummary.customer_id.is_(None))
+        )
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.where(
+                or_(
+                    Customer.name.ilike(search_pattern),
+                    Customer.manager_name.ilike(search_pattern),
+                )
+            )
+        sort_column = self.SORT_COLUMNS[sort_by]
+        if sort_order == SortOrder.DESC:
+            query = query.order_by(sort_column.desc(), Customer.id.desc())
+        else:
+            query = query.order_by(sort_column.asc(), Customer.id.asc())
+        return query
+
 
 class CustomerService:
     def __init__(self, db_session: Session) -> None:
@@ -162,6 +190,33 @@ class CustomerService:
             .order_by(Customer.id.asc())
         )
         return list(self._db_session.scalars(query).all())
+
+    def list_without_income(
+        self,
+        *,
+        search: str | None,
+        sort_by: str,
+        sort_order: SortOrder,
+        pagination: PaginationParams,
+    ) -> tuple[list[Customer], PaginationMeta]:
+        query = self._query_builder.build_without_income_query(
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total_count = int(
+            self._db_session.scalar(
+                select(func.count()).select_from(query.order_by(None).subquery())
+            ) or 0
+        )
+        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
+        items = list(self._db_session.scalars(paginated_query).all())
+        meta = PaginationMeta(
+            total_count=total_count,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
+        return items, meta
 
     def get_or_404(self, customer_id: int) -> Customer:
         customer = self._db_session.get(Customer, customer_id)
@@ -410,7 +465,6 @@ class CustomerIncomeQueryBuilder:
         else:
             query = query.order_by(sort_column.asc(), Customer.id.asc())
         return query
-
 
 class CustomerScopedAccessPolicy:
     def validate_customer_access(

@@ -1,10 +1,12 @@
 from datetime import datetime
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.common.dtos import MongoDTO, WithId
 from app.common.messages import ITEMS_MUST_NOT_BE_EMPTY
 from app.common.pagination import PaginatedResponse
+from app.common.validators.jalali_datetime import validate_jalali_date_string, validate_jalali_datetime_string
+from app.modules.customers.dtos import CustomerOut
 
 
 class ServiceProjectBase(MongoDTO):
@@ -166,7 +168,16 @@ class CustomerServiceConfigOut(WithId, CustomerServiceConfigBase):
     service_name: str = Field(..., description="Service name.", examples=["Camera Monitoring"])
     service_is_active: bool = Field(..., description="Service active status.", examples=[True])
     created_at: datetime = Field(..., description="Creation timestamp.")
-    updated_at: datetime = Field(..., description="Last update timestamp.")
+    updated_at: str = Field(
+        ...,
+        description="Last update timestamp as a Jalali datetime string in YYYY-MM-DD HH:MM:SS format.",
+        examples=["1405-01-05 14:35:22"],
+    )
+
+    @field_validator("updated_at")
+    @classmethod
+    def validate_updated_at(cls, value: str) -> str:
+        return validate_jalali_datetime_string(value)
 
 
 class CustomerServiceConfigListOut(PaginatedResponse[CustomerServiceConfigOut]):
@@ -282,6 +293,134 @@ class CustomerServicePurchaseUpdate(CustomerServicePurchaseBase):
         if self.items is not None and len(self.items) == 0:
             raise ValueError(ITEMS_MUST_NOT_BE_EMPTY)
         return self
+
+
+def validate_customer_service_selection_snapshot_date_string(value: str) -> str:
+    return validate_jalali_date_string(value)
+
+
+def validate_customer_service_selection_snapshot_time_string(value: str) -> str:
+    normalized_value = value.strip()
+    try:
+        datetime.strptime(normalized_value, "%H:%M:%S")
+    except ValueError as exc:
+        raise ValueError("Invalid snapshot time format. Use HH:MM:SS.") from exc
+    return normalized_value
+
+
+class CustomerServiceSelectionSnapshotCreate(MongoDTO):
+    customer_id: int = Field(..., description="Customer id.", examples=[1])
+    user_id: int = Field(..., description="User id that registered this snapshot.", examples=[7])
+    payload: str = Field(
+        ...,
+        description="Complete frontend payload captured as the raw string received from the frontend.",
+        examples=[
+            '{"project_id":3,"selected_config_ids":[11,12],"totals":{"sale_total":1200,"support_total":50,"grand_total":1250}}'
+        ],
+    )
+
+
+class CustomerServiceSelectionSnapshotOutBase(MongoDTO):
+    customer_id: int = Field(..., description="Customer id.", examples=[1])
+    user_id: int = Field(..., description="User id that registered this snapshot.", examples=[7])
+    date: str = Field(
+        ...,
+        description="Snapshot selected date as a Jalali date string in YYYY-MM-DD format.",
+        examples=["1405-01-05"],
+    )
+    time: str = Field(
+        ...,
+        description="Snapshot storage time in HH:MM:SS format.",
+        examples=["14:35:22"],
+    )
+    payload: str = Field(
+        ...,
+        description="Complete frontend payload captured as the raw string received from the frontend.",
+        examples=[
+            '{"project_id":3,"selected_config_ids":[11,12],"totals":{"sale_total":1200,"support_total":50,"grand_total":1250}}'
+        ],
+    )
+
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, value: str) -> str:
+        return validate_customer_service_selection_snapshot_date_string(value)
+
+    @field_validator("time")
+    @classmethod
+    def validate_time(cls, value: str) -> str:
+        return validate_customer_service_selection_snapshot_time_string(value)
+
+
+class CustomerServiceSelectionSnapshotCreateOut(WithId, CustomerServiceSelectionSnapshotOutBase):
+    pass
+
+
+class CustomerServiceSelectionSnapshotOut(WithId, CustomerServiceSelectionSnapshotOutBase):
+    customer_name: str = Field(..., description="Customer name.", examples=["Snapshot Customer"])
+    user_name: str = Field(..., description="User display name.", examples=["Snapshot User"])
+
+
+class CustomerServiceSelectionSnapshotListOut(PaginatedResponse[CustomerServiceSelectionSnapshotOut]):
+    pass
+
+
+class CustomerServiceTreeTotalsOut(MongoDTO):
+    configured_service_count: int = Field(..., description="Count of configured services.", examples=[3])
+    enabled_service_count: int = Field(..., description="Count of enabled services.", examples=[2])
+    sale_total: int = Field(..., description="Aggregated sale total.", examples=[12000000])
+    support_total: int = Field(..., description="Aggregated support total.", examples=[3000000])
+    grand_total: int = Field(..., description="Aggregated grand total.", examples=[15000000])
+
+
+class CustomerServiceTreeServiceOut(MongoDTO):
+    config_id: int = Field(..., description="Customer service config id.", examples=[1])
+    customer_id: int = Field(..., description="Customer id.", examples=[1])
+    service_id: int = Field(..., description="Service id.", examples=[10])
+    service_name: str = Field(..., description="Service name.", examples=["Camera Monitoring"])
+    service_description: str | None = Field(
+        default=None,
+        description="Service description.",
+        examples=["Monitoring and surveillance service."],
+    )
+    service_sort_order: int | None = Field(default=None, description="Service sort order.", examples=[10])
+    service_is_active: bool = Field(..., description="Service active status.", examples=[True])
+    is_enabled: bool = Field(..., description="Whether the service is enabled for the customer.", examples=[True])
+    sale_price: int | None = Field(default=None, description="Configured sale price.", examples=[5000000])
+    support_price: int = Field(..., description="Configured support price.", examples=[1500000])
+    notes: str | None = Field(default=None, description="Optional service notes.", examples=["Includes setup."])
+    line_sale_total: int = Field(..., description="Line sale total.", examples=[5000000])
+    line_support_total: int = Field(..., description="Line support total.", examples=[1500000])
+    line_grand_total: int = Field(..., description="Line grand total.", examples=[6500000])
+    config_created_at: datetime = Field(..., description="Customer service config creation timestamp.")
+    config_updated_at: datetime = Field(..., description="Customer service config last update timestamp.")
+    service_created_at: datetime = Field(..., description="Service catalog creation timestamp.")
+    service_updated_at: datetime = Field(..., description="Service catalog last update timestamp.")
+
+
+class CustomerServiceTreeGroupOut(ServiceGroupOut):
+    totals: CustomerServiceTreeTotalsOut = Field(..., description="Aggregated totals for this group.")
+    services: list[CustomerServiceTreeServiceOut] = Field(
+        ...,
+        description="Customer services inside this group.",
+    )
+
+
+class CustomerServiceTreeProjectOut(ServiceProjectOut):
+    totals: CustomerServiceTreeTotalsOut = Field(..., description="Aggregated totals for this project.")
+    groups: list[CustomerServiceTreeGroupOut] = Field(
+        ...,
+        description="Nested service groups for this project.",
+    )
+
+
+class CustomerServiceTreeOut(MongoDTO):
+    customer: CustomerOut = Field(..., description="Full customer information.")
+    projects: list[CustomerServiceTreeProjectOut] = Field(
+        ...,
+        description="Customer services grouped by project and group.",
+    )
+    totals: CustomerServiceTreeTotalsOut = Field(..., description="Overall customer service totals.")
 
 
 class CustomerPricingSummaryCustomer(MongoDTO):

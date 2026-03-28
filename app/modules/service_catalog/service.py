@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import Select, delete, func, or_, select
@@ -10,14 +11,17 @@ from sqlalchemy.orm import Session
 from app.common.database import Base, get_db_session
 from app.common.dtos import CurrentUser
 from app.common.enums import SortOrder, UserRole
+from app.common.formatters.jalali_datetime import gregorian_datetime_to_jalali_datetime_string
 from app.common.messages import (
     CUSTOMER_ACCESS_DENIED,
+    CUSTOMER_ID_INVALID_OR_INACTIVE,
     CUSTOMER_NOT_FOUND,
     CUSTOMER_SERVICE_CONFIG_IN_USE,
     CUSTOMER_SERVICE_CONFIG_NOT_FOUND,
     CUSTOMER_SERVICE_CONFIG_NOT_PURCHASABLE,
     CUSTOMER_SERVICE_CONFIG_SELECTION_INVALID,
     CUSTOMER_SERVICE_PURCHASE_NOT_FOUND,
+    CUSTOMER_SERVICE_SELECTION_SNAPSHOT_NOT_FOUND,
     DATA_INTEGRITY_ERROR,
     DUPLICATE_CUSTOMER_SERVICE_PURCHASE_SELECTION,
     DUPLICATE_CUSTOMER_SERVICE_CONFIGURATION,
@@ -32,6 +36,7 @@ from app.common.messages import (
     SERVICE_NOT_FOUND,
     SERVICE_PROJECT_NOT_FOUND,
     SUPPORT_PRICE_CANNOT_BE_NULL,
+    USER_ID_INVALID,
 )
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.modules.service_catalog.dtos import (
@@ -46,6 +51,12 @@ from app.modules.service_catalog.dtos import (
     CustomerServiceConfigUpdate,
     CustomerServicePurchaseCreate,
     CustomerServicePurchaseItemCreate,
+    CustomerServiceSelectionSnapshotCreate,
+    CustomerServiceTreeGroupOut,
+    CustomerServiceTreeOut,
+    CustomerServiceTreeProjectOut,
+    CustomerServiceTreeServiceOut,
+    CustomerServiceTreeTotalsOut,
     CustomerServicePurchaseUpdate,
     ServiceCreate,
     ServiceGroupCreate,
@@ -54,14 +65,30 @@ from app.modules.service_catalog.dtos import (
     ServiceProjectUpdate,
     ServiceUpdate,
 )
+from app.modules.customers.dtos import CustomerOut
+from app.modules.customers.schemas import Customer
 from app.modules.service_catalog.schemas import (
     CustomerServiceConfig,
     CustomerServicePurchase,
     CustomerServicePurchaseItem,
+    CustomerServiceSelectionSnapshot,
     Service,
     ServiceGroup,
     ServiceProject,
 )
+from app.modules.users.schemas import User
+
+
+def get_current_snapshot_datetime() -> datetime:
+    return datetime.now().replace(microsecond=0)
+
+
+def _snapshot_day_start(value: date) -> datetime:
+    return datetime.combine(value, time.min)
+
+
+def _snapshot_next_day_start(value: date) -> datetime:
+    return datetime.combine(value + timedelta(days=1), time.min)
 
 
 @dataclass
@@ -74,6 +101,13 @@ class ProjectHierarchyGroup:
 class ProjectHierarchy:
     project: ServiceProject
     groups: list[ProjectHierarchyGroup]
+
+
+@dataclass
+class CustomerServiceSelectionSnapshotView:
+    snapshot: CustomerServiceSelectionSnapshot
+    customer_name: str
+    user_name: str
 
 
 class CustomerLookupService:
@@ -122,6 +156,30 @@ class CustomerLookupService:
             "name": customer_row["name"],
             "grade": customer_row["grade"],
         }
+
+
+class UserLookupService:
+    def __init__(self, db_session: Session) -> None:
+        self._db_session = db_session
+
+    def get_active_for_customer_snapshot_or_422(
+        self,
+        *,
+        user_id: int,
+        customer_id: int,
+    ) -> User:
+        user = self._db_session.get(User, user_id)
+        if user is None or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=USER_ID_INVALID,
+            )
+        if user.role == UserRole.CUSTOMER and user.customer_id != customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=USER_ID_INVALID,
+            )
+        return user
 
 
 class ServiceProjectQueryBuilder:
@@ -782,6 +840,53 @@ class CustomerServicePurchaseQueryBuilder:
         return query
 
 
+class CustomerServiceSelectionSnapshotQueryBuilder:
+    SORT_COLUMNS = {
+        "id": CustomerServiceSelectionSnapshot.id,
+        "user_id": CustomerServiceSelectionSnapshot.user_id,
+        "date": CustomerServiceSelectionSnapshot.selected_at,
+    }
+
+    def build_list_query(
+        self,
+        *,
+        customer_id: int,
+        user_id: int | None,
+        from_date: date | None,
+        to_date: date | None,
+        sort_by: str,
+        sort_order: SortOrder,
+    ) -> Select[tuple[CustomerServiceSelectionSnapshot, str, str]]:
+        query = (
+            select(
+                CustomerServiceSelectionSnapshot,
+                Customer.name,
+                User.full_name,
+            )
+            .join(Customer, Customer.id == CustomerServiceSelectionSnapshot.customer_id)
+            .join(User, User.id == CustomerServiceSelectionSnapshot.user_id)
+            .where(CustomerServiceSelectionSnapshot.customer_id == customer_id)
+        )
+        if user_id is not None:
+            query = query.where(CustomerServiceSelectionSnapshot.user_id == user_id)
+        if from_date is not None:
+            query = query.where(CustomerServiceSelectionSnapshot.selected_at >= _snapshot_day_start(from_date))
+        if to_date is not None:
+            query = query.where(CustomerServiceSelectionSnapshot.selected_at < _snapshot_next_day_start(to_date))
+        sort_column = self.SORT_COLUMNS[sort_by]
+        if sort_order == SortOrder.DESC:
+            query = query.order_by(
+                sort_column.desc(),
+                CustomerServiceSelectionSnapshot.id.desc(),
+            )
+        else:
+            query = query.order_by(
+                sort_column.asc(),
+                CustomerServiceSelectionSnapshot.id.asc(),
+            )
+        return query
+
+
 class CustomerServicePurchaseSelectionPolicy:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
@@ -1144,6 +1249,338 @@ class CustomerServicePurchaseService:
             ) from exc
 
 
+class CustomerServiceSelectionSnapshotService:
+    def __init__(self, db_session: Session) -> None:
+        self._db_session = db_session
+        self._customer_lookup_service = CustomerLookupService(db_session=db_session)
+        self._user_lookup_service = UserLookupService(db_session=db_session)
+        self._access_policy = CustomerScopedAccessPolicy()
+        self._query_builder = CustomerServiceSelectionSnapshotQueryBuilder()
+
+    def list_by_customer(
+        self,
+        *,
+        customer_id: int,
+        user_id: int | None,
+        from_date: date | None,
+        to_date: date | None,
+        sort_by: str,
+        sort_order: SortOrder,
+        pagination: PaginationParams,
+        current_user: CurrentUser,
+    ) -> tuple[list[CustomerServiceSelectionSnapshotView], PaginationMeta]:
+        self._customer_lookup_service.get_active_or_404(customer_id=customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=customer_id,
+        )
+        if user_id is not None:
+            self._user_lookup_service.get_active_for_customer_snapshot_or_422(
+                user_id=user_id,
+                customer_id=customer_id,
+            )
+        query = self._query_builder.build_list_query(
+            customer_id=customer_id,
+            user_id=user_id,
+            from_date=from_date,
+            to_date=to_date,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total_count = int(
+            self._db_session.scalar(
+                select(func.count()).select_from(query.order_by(None).subquery())
+            ) or 0
+        )
+        paginated_query = query.offset(pagination.offset).limit(pagination.page_size)
+        rows = self._db_session.execute(paginated_query).all()
+        items = [
+            CustomerServiceSelectionSnapshotView(
+                snapshot=row[0],
+                customer_name=row[1],
+                user_name=row[2],
+            )
+            for row in rows
+        ]
+        meta = PaginationMeta(
+            total_count=total_count,
+            page=pagination.page,
+            page_size=pagination.page_size,
+        )
+        return items, meta
+
+    def create(
+        self,
+        *,
+        path_customer_id: int,
+        dto: CustomerServiceSelectionSnapshotCreate,
+        current_user: CurrentUser,
+    ) -> CustomerServiceSelectionSnapshot:
+        if dto.customer_id != path_customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=CUSTOMER_ID_INVALID_OR_INACTIVE,
+            )
+        self._customer_lookup_service.get_active_or_404(customer_id=dto.customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=dto.customer_id,
+        )
+        target_user = self._user_lookup_service.get_active_for_customer_snapshot_or_422(
+            user_id=dto.user_id,
+            customer_id=dto.customer_id,
+        )
+        if current_user.role != UserRole.ADMIN and target_user.id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=USER_ID_INVALID,
+            )
+        snapshot_timestamp = get_current_snapshot_datetime()
+        snapshot = CustomerServiceSelectionSnapshot(
+            customer_id=dto.customer_id,
+            user_id=target_user.id,
+            selected_at=snapshot_timestamp,
+            created_at=snapshot_timestamp,
+            updated_at=snapshot_timestamp,
+            payload=dto.payload,
+        )
+        self._db_session.add(snapshot)
+        self._commit_with_integrity_guard()
+        self._db_session.refresh(snapshot)
+        return snapshot
+
+    def get_by_id(
+        self,
+        *,
+        snapshot_id: int,
+        current_user: CurrentUser,
+    ) -> CustomerServiceSelectionSnapshotView:
+        snapshot = self._get_snapshot_view_or_404(snapshot_id=snapshot_id)
+        self._customer_lookup_service.get_active_or_404(customer_id=snapshot.snapshot.customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=snapshot.snapshot.customer_id,
+        )
+        return snapshot
+
+    def _get_snapshot_view_or_404(
+        self,
+        *,
+        snapshot_id: int,
+    ) -> CustomerServiceSelectionSnapshotView:
+        row = self._db_session.execute(
+            select(
+                CustomerServiceSelectionSnapshot,
+                Customer.name,
+                User.full_name,
+            )
+            .join(Customer, Customer.id == CustomerServiceSelectionSnapshot.customer_id)
+            .join(User, User.id == CustomerServiceSelectionSnapshot.user_id)
+            .where(CustomerServiceSelectionSnapshot.id == snapshot_id)
+        ).first()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=CUSTOMER_SERVICE_SELECTION_SNAPSHOT_NOT_FOUND,
+            )
+        return CustomerServiceSelectionSnapshotView(
+            snapshot=row[0],
+            customer_name=row[1],
+            user_name=row[2],
+        )
+
+    def _commit_with_integrity_guard(self) -> None:
+        try:
+            self._db_session.commit()
+        except IntegrityError as exc:
+            self._db_session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=DATA_INTEGRITY_ERROR,
+            ) from exc
+
+
+class CustomerServiceTreeService:
+    def __init__(self, db_session: Session) -> None:
+        self._db_session = db_session
+        self._access_policy = CustomerScopedAccessPolicy()
+
+    def get_tree(
+        self,
+        *,
+        customer_id: int,
+        current_user: CurrentUser,
+    ) -> CustomerServiceTreeOut:
+        customer = self._get_active_customer_or_404(customer_id=customer_id)
+        self._access_policy.validate_customer_access(
+            current_user=current_user,
+            customer_id=customer_id,
+        )
+        rows = self._db_session.execute(
+            select(CustomerServiceConfig, Service, ServiceGroup, ServiceProject)
+            .join(Service, Service.id == CustomerServiceConfig.service_id)
+            .join(ServiceGroup, ServiceGroup.id == Service.group_id)
+            .join(ServiceProject, ServiceProject.id == Service.project_id)
+            .where(
+                CustomerServiceConfig.customer_id == customer_id,
+                Service.is_active.is_(True),
+                ServiceGroup.is_active.is_(True),
+                ServiceProject.is_active.is_(True),
+            )
+            .order_by(
+                ServiceProject.sort_order.asc(),
+                ServiceProject.id.asc(),
+                ServiceGroup.sort_order.asc(),
+                ServiceGroup.id.asc(),
+                Service.sort_order.asc(),
+                Service.id.asc(),
+                CustomerServiceConfig.id.asc(),
+            )
+        ).all()
+
+        project_nodes: list[CustomerServiceTreeProjectOut] = []
+        project_bucket: dict[int, CustomerServiceTreeProjectOut] = {}
+        group_bucket: dict[tuple[int, int], CustomerServiceTreeGroupOut] = {}
+        overall_totals = self._new_totals()
+
+        for row in rows:
+            config: CustomerServiceConfig = row[0]
+            service: Service = row[1]
+            group: ServiceGroup = row[2]
+            project: ServiceProject = row[3]
+
+            project_node = project_bucket.get(project.id)
+            if project_node is None:
+                project_node = CustomerServiceTreeProjectOut(
+                    id=project.id,
+                    name=project.name,
+                    description=project.description,
+                    sort_order=project.sort_order,
+                    is_active=project.is_active,
+                    created_at=project.created_at,
+                    updated_at=project.updated_at,
+                    totals=self._new_totals(),
+                    groups=[],
+                )
+                project_bucket[project.id] = project_node
+                project_nodes.append(project_node)
+
+            group_key = (project.id, group.id)
+            group_node = group_bucket.get(group_key)
+            if group_node is None:
+                group_node = CustomerServiceTreeGroupOut(
+                    id=group.id,
+                    name=group.name,
+                    description=group.description,
+                    sort_order=group.sort_order,
+                    is_active=group.is_active,
+                    created_at=group.created_at,
+                    updated_at=group.updated_at,
+                    totals=self._new_totals(),
+                    services=[],
+                )
+                group_bucket[group_key] = group_node
+                project_node.groups.append(group_node)
+
+            sale_price_value = config.sale_price if config.sale_price is not None else 0
+            line_sale_total = sale_price_value if config.is_enabled else 0
+            line_support_total = config.support_price if config.is_enabled else 0
+            line_grand_total = line_sale_total + line_support_total
+
+            group_node.services.append(
+                CustomerServiceTreeServiceOut(
+                    config_id=config.id,
+                    customer_id=config.customer_id,
+                    service_id=service.id,
+                    service_name=service.name,
+                    service_description=service.description,
+                    service_sort_order=service.sort_order,
+                    service_is_active=service.is_active,
+                    is_enabled=config.is_enabled,
+                    sale_price=config.sale_price,
+                    support_price=config.support_price,
+                    notes=config.notes,
+                    line_sale_total=line_sale_total,
+                    line_support_total=line_support_total,
+                    line_grand_total=line_grand_total,
+                    config_created_at=config.created_at,
+                    config_updated_at=config.updated_at,
+                    service_created_at=service.created_at,
+                    service_updated_at=service.updated_at,
+                )
+            )
+
+            self._accumulate_totals(
+                totals=group_node.totals,
+                is_enabled=config.is_enabled,
+                line_sale_total=line_sale_total,
+                line_support_total=line_support_total,
+                line_grand_total=line_grand_total,
+            )
+            self._accumulate_totals(
+                totals=project_node.totals,
+                is_enabled=config.is_enabled,
+                line_sale_total=line_sale_total,
+                line_support_total=line_support_total,
+                line_grand_total=line_grand_total,
+            )
+            self._accumulate_totals(
+                totals=overall_totals,
+                is_enabled=config.is_enabled,
+                line_sale_total=line_sale_total,
+                line_support_total=line_support_total,
+                line_grand_total=line_grand_total,
+            )
+
+        return CustomerServiceTreeOut(
+            customer=CustomerOut(
+                id=customer.id,
+                name=customer.name,
+                manager_name=customer.manager_name,
+                grade=customer.grade,
+                is_active=customer.is_active,
+                created_at=customer.created_at,
+                updated_at=gregorian_datetime_to_jalali_datetime_string(customer.updated_at),
+            ),
+            projects=project_nodes,
+            totals=overall_totals,
+        )
+
+    def _get_active_customer_or_404(self, *, customer_id: int) -> Customer:
+        customer = self._db_session.get(Customer, customer_id)
+        if customer is None or not customer.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=CUSTOMER_NOT_FOUND,
+            )
+        return customer
+
+    def _new_totals(self) -> CustomerServiceTreeTotalsOut:
+        return CustomerServiceTreeTotalsOut(
+            configured_service_count=0,
+            enabled_service_count=0,
+            sale_total=0,
+            support_total=0,
+            grand_total=0,
+        )
+
+    def _accumulate_totals(
+        self,
+        *,
+        totals: CustomerServiceTreeTotalsOut,
+        is_enabled: bool,
+        line_sale_total: int,
+        line_support_total: int,
+        line_grand_total: int,
+    ) -> None:
+        totals.configured_service_count += 1
+        if is_enabled:
+            totals.enabled_service_count += 1
+        totals.sale_total += line_sale_total
+        totals.support_total += line_support_total
+        totals.grand_total += line_grand_total
+
+
 class CustomerPricingSummaryService:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
@@ -1267,6 +1704,18 @@ def get_customer_service_purchase_service(
     db_session: Session = Depends(get_db_session),
 ) -> CustomerServicePurchaseService:
     return CustomerServicePurchaseService(db_session=db_session)
+
+
+def get_customer_service_selection_snapshot_service(
+    db_session: Session = Depends(get_db_session),
+) -> CustomerServiceSelectionSnapshotService:
+    return CustomerServiceSelectionSnapshotService(db_session=db_session)
+
+
+def get_customer_service_tree_service(
+    db_session: Session = Depends(get_db_session),
+) -> CustomerServiceTreeService:
+    return CustomerServiceTreeService(db_session=db_session)
 
 
 def get_customer_pricing_summary_service(

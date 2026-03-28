@@ -4,6 +4,7 @@ from pydantic import Field, field_validator, model_validator
 
 from app.common.dtos import MongoDTO, WithId
 from app.common.pagination import PaginatedResponse
+from app.common.validators.jalali_datetime import validate_jalali_datetime_string
 
 
 class FeedbackCreate(MongoDTO):
@@ -65,8 +66,17 @@ class FeedbackOut(WithId):
         description="Selected feedback option labels.",
         examples=[["Fast support", "Analytics"]],
     )
-    created_at: datetime = Field(..., description="Creation timestamp.")
+    created_at: str = Field(
+        ...,
+        description="Creation timestamp as a Jalali datetime string in YYYY-MM-DD HH:MM:SS format.",
+        examples=["1405-01-05 14:35:22"],
+    )
     updated_at: datetime = Field(..., description="Last update timestamp.")
+
+    @field_validator("created_at")
+    @classmethod
+    def validate_created_at(cls, value: str) -> str:
+        return validate_jalali_datetime_string(value)
 
 
 class FeedbackListOut(PaginatedResponse[FeedbackOut]):

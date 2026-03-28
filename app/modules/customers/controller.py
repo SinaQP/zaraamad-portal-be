@@ -133,6 +133,43 @@ def get_all_customers(
 
 
 @router.get(
+    "/without-income",
+    tags=[CUSTOMERS_TAG],
+    response_model=CustomerListOut,
+    summary="List customers without income",
+    description="Return active customers that do not yet have imported income summaries.",
+    responses={
+        200: {"description": "Customers without income returned."},
+        403: {"description": "Admin access required."},
+    },
+)
+def list_customers_without_income(
+    response: Response,
+    search: str | None = Query(default=None, description="Search by customer name or manager name."),
+    sort_by: Literal["id", "name", "manager_name", "grade", "is_active", "created_at", "updated_at"] = Query(
+        default="id",
+        description="Sort field.",
+    ),
+    sort_order: SortOrder = Query(default=SortOrder.ASC, description="Sort direction."),
+    pagination: PaginationParams = Depends(get_pagination_params),
+    _: object = Depends(require_admin),
+    service: CustomerService = Depends(get_customer_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerListOut:
+    customers, meta = service.list_without_income(
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        pagination=pagination,
+    )
+    set_pagination_headers(response=response, meta=meta)
+    return CustomerListOut(
+        items=[mapper.to_out(customer=item) for item in customers],
+        total_page=meta.total_pages,
+    )
+
+
+@router.get(
     "/income",
     tags=[CUSTOMERS_TAG],
     response_model=CustomerIncomeListOut,

@@ -17,6 +17,7 @@ _CUSTOM_VALUE_ERROR_TRANSLATIONS = {
     "At least one of message or selected_options must be provided.": messages.FEEDBACK_CONTENT_REQUIRED,
     "Each selected option must be at most 255 characters.": messages.FEEDBACK_OPTION_TOO_LONG,
     "At least one of subscription or messages must be provided.": messages.SUBSCRIPTION_CONFIG_UPDATE_REQUIRED,
+    "Invalid Jalali date format. Use YYYY-MM-DD.": messages.INVALID_JALALI_DATE,
     "Invalid Jalali datetime format. Use YYYY-MM-DD HH:MM:SS.": messages.INVALID_JALALI_DATETIME,
 }
 
@@ -33,6 +34,7 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.USER_NOT_FOUND: "Requested user record was not found.",
     messages.USER_INACTIVE: "Requested user is inactive.",
     messages.USER_NOT_FOUND_OR_INACTIVE: "Active user record for the provided identifier was not found.",
+    messages.USER_ID_INVALID: "The supplied user_id does not exist, is inactive, or is invalid for this request.",
     messages.INVALID_CREDENTIALS: "Mobile/password combination did not match an active user.",
     messages.MOBILE_ALREADY_EXISTS: "Unique constraint on user mobile was violated.",
     messages.OTP_DELIVERY_FAILED: "OTP delivery provider failed.",
@@ -75,6 +77,9 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
         "The customer service config cannot be deleted because purchase history references it."
     ),
     messages.CUSTOMER_SERVICE_PURCHASE_NOT_FOUND: "Requested customer service purchase record was not found.",
+    messages.CUSTOMER_SERVICE_SELECTION_SNAPSHOT_NOT_FOUND: (
+        "Requested customer service selection snapshot record was not found."
+    ),
     messages.CUSTOMER_SERVICE_CONFIG_SELECTION_INVALID: (
         "At least one selected customer_service_config_id was invalid for this customer."
     ),
@@ -90,6 +95,7 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.ACTIVE_SUBSCRIPTION_END_DATE_REQUIRED: "Creating an active subscription requires an end_date value.",
     messages.DUPLICATE_SUBSCRIPTION_MESSAGE_STATUS: "The payload contains duplicate subscription message statuses.",
     messages.SUBSCRIPTION_CONFIG_UPDATE_REQUIRED: "The request body did not include subscription or messages.",
+    messages.INVALID_JALALI_DATE: "A Jalali date field did not match YYYY-MM-DD.",
     messages.INVALID_JALALI_DATETIME: "A Jalali datetime field did not match YYYY-MM-DD HH:MM:SS.",
     messages.ROUTE_NOT_FOUND: "Route not found.",
     messages.METHOD_NOT_ALLOWED: "HTTP method is not allowed for this route.",

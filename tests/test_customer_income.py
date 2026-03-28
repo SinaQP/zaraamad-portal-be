@@ -104,6 +104,26 @@ def _create_user(
     return user
 
 
+def _create_customer(
+    db_session: Session,
+    *,
+    name: str,
+    manager_name: str | None = None,
+    grade: int = 1,
+    is_active: bool = True,
+) -> Customer:
+    customer = Customer(
+        name=name,
+        manager_name=manager_name,
+        grade=grade,
+        is_active=is_active,
+    )
+    db_session.add(customer)
+    db_session.commit()
+    db_session.refresh(customer)
+    return customer
+
+
 def _login(client: TestClient, mobile: str) -> str:
     otp_response = client.post("/auth/request-otp", json={"mobile": mobile})
     otp_code = otp_response.json()["dev_otp"]
@@ -305,6 +325,86 @@ def test_customer_income_endpoints_return_expected_shapes(
         SERVICE_BUCKET_NAME,
     ]
     assert detail_payload["monthly_reports"] == []
+
+
+def test_customers_without_income_endpoint_returns_only_active_customers_without_income(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    alpha_customer = _create_customer(
+        db_session=db_session,
+        name="No Income Alpha",
+        manager_name="Farzaneh Manager",
+        grade=1,
+    )
+    with_income_customer = _create_customer(
+        db_session=db_session,
+        name="Has Income Customer",
+        manager_name="Income Manager",
+        grade=2,
+    )
+    beta_customer = _create_customer(
+        db_session=db_session,
+        name="No Income Beta",
+        manager_name="Mehran Manager",
+        grade=3,
+    )
+    _create_customer(
+        db_session=db_session,
+        name="Inactive Without Income",
+        manager_name="Farzaneh Manager",
+        grade=4,
+        is_active=False,
+    )
+    db_session.add(
+        CustomerIncomeSummary(
+            customer_id=with_income_customer.id,
+            registered_income_amount=750,
+            issued_bill_count=40,
+            paid_bill_count=30,
+            collection_rate_percent=75,
+        )
+    )
+    db_session.commit()
+
+    admin = _create_user(
+        db_session=db_session,
+        full_name="Income Admin",
+        mobile="09129990007",
+        role=UserRole.ADMIN,
+        customer_id=None,
+    )
+    admin_headers = {"Authorization": f"Bearer {_login(client=client, mobile=admin.mobile)}"}
+
+    search_response = client.get(
+        "/customers/without-income",
+        headers=admin_headers,
+        params={"search": "Farzaneh"},
+    )
+    assert search_response.status_code == 200
+    assert search_response.headers["X-Total-Count"] == "1"
+    assert [item["id"] for item in search_response.json()["items"]] == [alpha_customer.id]
+
+    paged_response = client.get(
+        "/customers/without-income",
+        headers=admin_headers,
+        params={
+            "sort_by": "name",
+            "sort_order": "asc",
+            "page": 2,
+            "page_size": 1,
+        },
+    )
+    assert paged_response.status_code == 200
+    assert paged_response.headers["X-Total-Count"] == "2"
+    assert paged_response.headers["X-Page"] == "2"
+    assert paged_response.headers["X-Page-Size"] == "1"
+    assert paged_response.headers["X-Total-Pages"] == "2"
+
+    payload = paged_response.json()
+    assert payload["total_page"] == 2
+    assert [item["id"] for item in payload["items"]] == [beta_customer.id]
+    assert [item["name"] for item in payload["items"]] == ["No Income Beta"]
 
 
 def test_bulk_upsert_customer_income_updates_multiple_customers(

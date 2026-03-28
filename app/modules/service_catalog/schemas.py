@@ -1,4 +1,6 @@
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, ForeignKey, Integer, String, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.database import Base, TimestampMixin
@@ -156,3 +158,21 @@ class CustomerServicePurchaseItem(Base, TimestampMixin):
     service_name: Mapped[str] = mapped_column(String(255), nullable=False)
     sale_price: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     support_price: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class CustomerServiceSelectionSnapshot(Base, TimestampMixin):
+    __tablename__ = "customer_service_selection_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    selected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    payload: Mapped[str] = mapped_column(Text(), nullable=False)

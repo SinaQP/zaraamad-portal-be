@@ -1,7 +1,14 @@
+from app.common.formatters.jalali_datetime import (
+    gregorian_date_to_jalali_date_string,
+    gregorian_datetime_to_jalali_datetime_string,
+    gregorian_datetime_to_time_string,
+)
 from app.modules.service_catalog.dtos import (
     CustomerServiceConfigOut,
     CustomerServicePurchaseItemOut,
     CustomerServicePurchaseOut,
+    CustomerServiceSelectionSnapshotCreateOut,
+    CustomerServiceSelectionSnapshotOut,
     ServiceGroupInfo,
     ServiceGroupOut,
     ServiceOut,
@@ -15,6 +22,7 @@ from app.modules.service_catalog.schemas import (
     CustomerServiceConfig,
     CustomerServicePurchase,
     CustomerServicePurchaseItem,
+    CustomerServiceSelectionSnapshot,
     Service,
     ServiceGroup,
     ServiceProject,
@@ -134,7 +142,7 @@ class ServiceCatalogMapper:
             support_price=config.support_price,
             notes=config.notes,
             created_at=config.created_at,
-            updated_at=config.updated_at,
+            updated_at=gregorian_datetime_to_jalali_datetime_string(config.updated_at),
         )
 
     def to_customer_service_purchase_item_out(
@@ -183,6 +191,37 @@ class ServiceCatalogMapper:
             ],
             created_at=purchase.created_at,
             updated_at=purchase.updated_at,
+        )
+
+    def to_customer_service_selection_snapshot_out(
+        self,
+        snapshot: CustomerServiceSelectionSnapshot,
+        *,
+        customer_name: str,
+        user_name: str,
+    ) -> CustomerServiceSelectionSnapshotOut:
+        return CustomerServiceSelectionSnapshotOut(
+            id=snapshot.id,
+            customer_id=snapshot.customer_id,
+            customer_name=customer_name,
+            user_id=snapshot.user_id,
+            user_name=user_name,
+            date=gregorian_date_to_jalali_date_string(snapshot.selected_at.date()),
+            time=gregorian_datetime_to_time_string(snapshot.selected_at),
+            payload=snapshot.payload,
+        )
+
+    def to_customer_service_selection_snapshot_create_out(
+        self,
+        snapshot: CustomerServiceSelectionSnapshot,
+    ) -> CustomerServiceSelectionSnapshotCreateOut:
+        return CustomerServiceSelectionSnapshotCreateOut(
+            id=snapshot.id,
+            customer_id=snapshot.customer_id,
+            user_id=snapshot.user_id,
+            date=gregorian_date_to_jalali_date_string(snapshot.selected_at.date()),
+            time=gregorian_datetime_to_time_string(snapshot.selected_at),
+            payload=snapshot.payload,
         )
 
 
