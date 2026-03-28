@@ -156,7 +156,10 @@ class CustomerIncomeCustomerOut(MongoDTO):
 
 class CustomerIncomeDetailOut(MongoDTO):
     customer: CustomerIncomeCustomerOut = Field(..., description="Customer information.")
-    summary: CustomerIncomeSummaryOut = Field(..., description="Income summary for the customer.")
+    summary: CustomerIncomeSummaryOut | None = Field(
+        default=None,
+        description="Income summary for the customer, or null if no income has been imported yet.",
+    )
     buckets: list[CustomerIncomeBucketOut] = Field(
         ...,
         description="Income bucket breakdown for the customer.",

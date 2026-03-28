@@ -158,7 +158,7 @@ class CustomerMapper:
     def to_income_detail_out(
         self,
         customer: Customer,
-        income_summary: CustomerIncomeSummary,
+        income_summary: CustomerIncomeSummary | None,
         buckets: list[CustomerIncomeBucket],
         monthly_reports: list[CustomerIncomeMonthlyReport],
     ) -> CustomerIncomeDetailOut:
@@ -169,7 +169,11 @@ class CustomerMapper:
                 manager_name=customer.manager_name,
                 grade=customer.grade,
             ),
-            summary=self.to_income_summary_out(income_summary=income_summary),
+            summary=(
+                self.to_income_summary_out(income_summary=income_summary)
+                if income_summary is not None
+                else None
+            ),
             buckets=[self.to_income_bucket_out(bucket=item) for item in buckets],
             monthly_reports=[
                 self.to_income_monthly_report_out(monthly_report=item)

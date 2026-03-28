@@ -26,7 +26,6 @@ from app.common.messages import (
     CUSTOMER_BRIDGE_UNAVAILABLE,
     CUSTOMER_ID_INVALID_OR_INACTIVE,
     CUSTOMER_INCOME_BUCKET_TOTAL_MISMATCH,
-    CUSTOMER_INCOME_NOT_FOUND,
     CUSTOMER_NOT_FOUND,
     DATA_INTEGRITY_ERROR,
     DUPLICATE_CUSTOMER_INCOME_BUCKET_CODE,
@@ -630,7 +629,7 @@ class CustomerIncomeService:
         current_user: CurrentUser,
     ) -> tuple[
         Customer,
-        CustomerIncomeSummary,
+        CustomerIncomeSummary | None,
         list[CustomerIncomeBucket],
         list[CustomerIncomeMonthlyReport],
     ]:
@@ -640,11 +639,6 @@ class CustomerIncomeService:
             customer_id=customer.id,
         )
         income_summary = self._db_session.get(CustomerIncomeSummary, customer.id)
-        if income_summary is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=CUSTOMER_INCOME_NOT_FOUND,
-            )
         bucket_query = (
             select(CustomerIncomeBucket)
             .where(CustomerIncomeBucket.customer_id == customer.id)

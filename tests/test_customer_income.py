@@ -327,6 +327,40 @@ def test_customer_income_endpoints_return_expected_shapes(
     assert detail_payload["monthly_reports"] == []
 
 
+def test_customer_income_detail_returns_null_summary_when_customer_has_no_income(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    customer = _create_customer(
+        db_session=db_session,
+        name="No Income Detail Customer",
+        manager_name="Niloofar Manager",
+        grade=2,
+    )
+    customer_user = _create_user(
+        db_session=db_session,
+        full_name="No Income User",
+        mobile="09129990003",
+        role=UserRole.CUSTOMER,
+        customer_id=customer.id,
+    )
+
+    customer_headers = {"Authorization": f"Bearer {_login(client=client, mobile=customer_user.mobile)}"}
+
+    response = client.get(
+        f"/customers/{customer.id}/income",
+        headers=customer_headers,
+    )
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["customer"]["id"] == customer.id
+    assert payload["customer"]["name"] == customer.name
+    assert payload["summary"] is None
+    assert payload["buckets"] == []
+    assert payload["monthly_reports"] == []
+
+
 def test_customers_without_income_endpoint_returns_only_active_customers_without_income(
     client: TestClient,
     db_session: Session,

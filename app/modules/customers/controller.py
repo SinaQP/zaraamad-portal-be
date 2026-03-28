@@ -275,12 +275,15 @@ def get_customer(
     tags=[CUSTOMERS_TAG],
     response_model=CustomerIncomeDetailOut,
     summary="Get customer income detail",
-    description="Return imported customer income summary data together with the stored bucket breakdown.",
+    description=(
+        "Return imported customer income summary data together with the stored bucket breakdown. "
+        "If no income has been imported yet, the response returns null summary fields and empty breakdown lists."
+    ),
     responses={
         200: {"description": "Customer income detail returned."},
         401: {"description": "Authentication required."},
         403: {"description": "Customer access denied."},
-        404: {"description": "Customer or customer income data not found."},
+        404: {"description": "Customer not found."},
     },
 )
 def get_customer_income_detail(
