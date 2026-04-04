@@ -16,6 +16,7 @@ from app.common.messages import HOME_WELCOME_TEMPLATE
 from app.modules.auth.module import router as auth_router
 from app.modules.customers.module import router as customer_router
 from app.modules.feedback.module import router as feedback_router
+from app.modules.forms.module import router as forms_router
 from app.modules.service_catalog.module import router as service_catalog_router
 from app.modules.users.module import router as user_router
 
@@ -31,6 +32,14 @@ OPENAPI_TAGS = [
     {
         "name": "feedback",
         "description": "Authenticated feedback submission and admin review endpoints.",
+    },
+    {
+        "name": "forms",
+        "description": "Form schema read endpoints with municipality-aware resolution.",
+    },
+    {
+        "name": "form-admin",
+        "description": "Authenticated form schema and field management endpoints.",
     },
     {
         "name": "customers",
@@ -101,6 +110,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(user_router)
     app.include_router(feedback_router)
+    app.include_router(forms_router)
     app.include_router(customer_router)
     app.include_router(service_catalog_router)
     return app

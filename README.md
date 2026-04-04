@@ -2,7 +2,7 @@
 
 Backend API for Zaraamad Portal Phase 1.
 
-Current release: `0.12.0`
+Current release: `1.1.0`
 
 ## Overview
 
@@ -10,6 +10,7 @@ This backend currently provides:
 
 - OTP-based login
 - JWT access authentication
+- Form schema service with municipality-aware resolution and remote token introspection
 - Customer management
 - Customer income summary and bucket import
 - User management
@@ -115,6 +116,7 @@ Key environment variables:
 - `APP_VERSION`: release version used to generate `app/version.py`
 - `APP_ENV`: environment label such as `development`
 - `DATABASE_URL`: database connection string
+- `FORM_SERVICE_DEBUG`: toggle extra form-service diagnostics when needed
 - `JWT_SECRET_KEY`: JWT signing secret
 - `JWT_ALGORITHM`: JWT signing algorithm
 - `JWT_ACCESS_TOKEN_EXPIRE_MINUTES`: access token lifetime
@@ -122,6 +124,11 @@ Key environment variables:
 - `OTP_REQUEST_LIMIT_COUNT`: request limit per rate window
 - `OTP_REQUEST_LIMIT_WINDOW_SECONDS`: OTP rate-limit window
 - `OTP_DEV_MODE`: if `true`, API returns `dev_otp` in OTP response
+- `AUTH_INTROSPECTION_URL`: legacy Zaraamad authenticated-user endpoint used for remote bearer token introspection
+- `AUTH_INTROSPECTION_TIMEOUT`: timeout in seconds for remote introspection requests
+- `AUTH_INTROSPECTION_CACHE_TTL`: success-cache TTL in seconds for remote introspection by bearer token hash
+- `AUTH_INTROSPECTION_FAIL_OPEN`: unsafe escape hatch that bypasses remote introspection failures when explicitly enabled
+- `IS_FORM_ADMIN`: allows authenticated remote users to call form admin endpoints when set to `true`
 - `SMS_API_URL`: SMS provider endpoint
 - `SMS_REQUEST_TIMEOUT_SECONDS`: SMS request timeout
 - `BRIDGE_API_KEY`: shared secret used for bridge-authenticated API access
@@ -296,6 +303,95 @@ Customer service purchases:
 - `GET /customer-service-purchases/{purchase_id}`
 - `PATCH /customer-service-purchases/{purchase_id}`
 - `DELETE /customer-service-purchases/{purchase_id}`
+
+Forms:
+
+- `GET /api/forms/`
+- `GET /api/forms/{key}/`
+- `GET /api/forms/{key}/resolved/`
+- `POST /api/admin/forms/`
+- `PATCH /api/admin/forms/{form_id}/`
+- `DELETE /api/admin/forms/{form_id}/`
+- `POST /api/admin/fields/`
+- `PATCH /api/admin/fields/{field_id}/`
+- `DELETE /api/admin/fields/{field_id}/`
+
+## Form Service
+
+### Remote auth
+
+The form endpoints accept the existing Zaraamad bearer token and validate it remotely through `AUTH_INTROSPECTION_URL`. Successful introspection responses are cached for `AUTH_INTROSPECTION_CACHE_TTL` seconds by token hash. The resolved auth context keeps `user_id`, `user_name`, `municipality_code`, and `municipality`.
+
+Write endpoints under `/api/admin/*` require authenticated remote form-admin access. If `IS_FORM_ADMIN=true`, any authenticated remote user can use those endpoints. Otherwise the introspection payload must indicate form-admin access through admin/staff flags, role, or permissions.
+
+### Resolution
+
+`GET /api/forms/{key}/resolved/` resolves forms in this order:
+
+1. active municipality-scoped form for the authenticated user municipality
+2. active municipality-scoped form for the `municipality_code` query parameter
+3. active global form with the same key
+
+Read responses return top-level fields under `fields`, and compound parent fields expose nested children under `sub_fields`.
+
+### Seed migrations
+
+Canonical forms are defined in [`app/modules/forms/seeds/forms_seed_data.py`](./app/modules/forms/seeds/forms_seed_data.py) and applied by Alembic revision `20260404_0028`. The seed logic is idempotent, updates existing managed forms, supports nested sub-fields, and removes obsolete managed fields.
+
+### Sample response
+
+```json
+{
+  "id": 1,
+  "key": "blp_property_general_info",
+  "title": "اطلاعات عمومی ملک",
+  "version": 1,
+  "description": "فرم پایه اطلاعات عمومی پرونده ساختمانی",
+  "is_active": true,
+  "scope_type": "global",
+  "scope_value": null,
+  "fields": [
+    {
+      "id": 10,
+      "form_id": 1,
+      "parent_field_id": null,
+      "key": "detail",
+      "label": "جزئیات",
+      "type": "compound",
+      "required": false,
+      "order_index": 90,
+      "placeholder": null,
+      "default_value": null,
+      "validation": null,
+      "source": null,
+      "options": null,
+      "binding": "dynamic",
+      "sub_fields": [
+        {
+          "id": 11,
+          "form_id": 1,
+          "parent_field_id": 10,
+          "key": "detail.land_geo_location_id",
+          "label": "موقعیت جغرافیایی زمین",
+          "type": "select",
+          "required": false,
+          "order_index": 10,
+          "placeholder": null,
+          "default_value": null,
+          "validation": null,
+          "source": {
+            "kind": "lookup",
+            "key": "land-geo-location"
+          },
+          "options": null,
+          "binding": "dynamic",
+          "sub_fields": []
+        }
+      ]
+    }
+  ]
+}
+```
 
 ## List, Search, and Pagination
 
