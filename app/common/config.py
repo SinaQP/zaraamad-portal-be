@@ -41,11 +41,6 @@ class Settings(BaseSettings):
     sms_panel_sender: str = "9820002739006"
     seed_admin_full_name: str = "System Admin"
     seed_admin_mobile: str = "09120000000"
-    auth_introspection_url: str = "http://localhost/upm/users/get_authenticated_user/"
-    auth_introspection_timeout: int = 3
-    auth_introspection_cache_ttl: int = 45
-    auth_introspection_fail_open: bool = False
-    is_form_admin: bool = False
     cors_allowed_origins: list[str] = []
     cors_allowed_origin_regex: str | None = (
         r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"

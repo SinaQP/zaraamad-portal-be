@@ -1,25 +1,13 @@
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.common.messages import INVALID_AUTH_TOKEN
-from app.common.security.remote_auth import (
-    RemoteAuthCache,
-    RemoteAuthPayloadExtractor,
-    RemoteAuthUnauthorizedError,
-    RemoteAuthenticatedUser,
-    RemoteBearerAuthenticator,
-    get_optional_remote_authenticated_user,
-)
-from app.common.config import Settings
-from app.main import app
 from app.modules.forms.constants import FormBindingType, FormFieldType, FormScopeType
 from app.modules.forms.schemas import FormField, FormSchema
-from app.modules.forms.service import FormSeedService
 from app.modules.forms.seeds.forms_seed_data import FORM_SEED_DEFINITIONS
+from app.modules.forms.service import FormSeedService
 
 
 def _create_form(
@@ -206,7 +194,7 @@ def test_resolved_form_falls_back_to_global_when_municipality_form_missing(
     assert response.json()["scope_type"] == "global"
 
 
-def test_resolved_form_uses_authenticated_user_municipality_first(
+def test_resolved_form_uses_query_param_municipality_scope(
     client: TestClient,
     db_session: Session,
 ) -> None:
@@ -224,15 +212,7 @@ def test_resolved_form_uses_authenticated_user_municipality_first(
         scope_type=FormScopeType.MUNICIPALITY,
         scope_value="sirjan",
     )
-    app.dependency_overrides[get_optional_remote_authenticated_user] = lambda: RemoteAuthenticatedUser(
-        user_id=9,
-        user_name="Ali",
-        municipality_code="sirjan",
-        municipality={"code": "sirjan", "name": "Sirjan"},
-        raw_payload={"user_id": 9, "municipality_code": "sirjan"},
-    )
-
-    response = client.get("/api/forms/resolved-form/resolved/?municipality_code=zarand")
+    response = client.get("/api/forms/resolved-form/resolved/?municipality_code=sirjan")
 
     assert response.status_code == 200
     assert response.json()["id"] == municipality_form.id
@@ -274,110 +254,3 @@ def test_seed_service_is_idempotent_and_removes_obsolete_fields(db_session: Sess
     assert initial_form_count == len(FORM_SEED_DEFINITIONS)
     assert final_form_count == len(FORM_SEED_DEFINITIONS)
     assert obsolete_count == 0
-
-
-class SuccessfulIntrospectionClient:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def introspect(
-        self,
-        *,
-        url: str,
-        authorization_header: str,
-        timeout_seconds: int,
-    ) -> dict[str, object]:
-        self.calls += 1
-        assert url == "https://legacy.example.com/upm/users/get_authenticated_user/"
-        assert authorization_header == "Bearer good-token"
-        assert timeout_seconds == 3
-        return {
-            "user_id": 42,
-            "user_name": "Remote User",
-            "municipality_code": "sirjan",
-            "municipality": {"code": "sirjan", "name": "Sirjan"},
-        }
-
-
-class UnauthorizedIntrospectionClient:
-    def introspect(
-        self,
-        *,
-        url: str,
-        authorization_header: str,
-        timeout_seconds: int,
-    ) -> dict[str, object]:
-        del url, authorization_header, timeout_seconds
-        raise RemoteAuthUnauthorizedError(status_code=401)
-
-
-def _build_remote_authenticator(client: object) -> RemoteBearerAuthenticator:
-    return RemoteBearerAuthenticator(
-        settings=Settings(
-            auth_introspection_url="https://legacy.example.com/upm/users/get_authenticated_user/",
-            auth_introspection_timeout=3,
-            auth_introspection_cache_ttl=60,
-            auth_introspection_fail_open=False,
-        ),
-        introspection_client=client,  # type: ignore[arg-type]
-        payload_extractor=RemoteAuthPayloadExtractor(),
-        cache=RemoteAuthCache(),
-    )
-
-
-def test_remote_authenticator_succeeds_and_caches_result() -> None:
-    client = SuccessfulIntrospectionClient()
-    authenticator = _build_remote_authenticator(client)
-
-    first_user = authenticator.authenticate("good-token")
-    second_user = authenticator.authenticate("good-token")
-
-    assert first_user.user_id == 42
-    assert first_user.user_name == "Remote User"
-    assert first_user.municipality_code == "sirjan"
-    assert first_user.municipality == {"code": "sirjan", "name": "Sirjan"}
-    assert second_user == first_user
-    assert client.calls == 1
-
-
-def test_remote_authenticator_rejects_invalid_token() -> None:
-    authenticator = _build_remote_authenticator(UnauthorizedIntrospectionClient())
-
-    with pytest.raises(HTTPException) as exc_info:
-        authenticator.authenticate("bad-token")
-
-    assert exc_info.value.status_code == 401
-    assert exc_info.value.detail["message"] == INVALID_AUTH_TOKEN
-
-
-def test_remote_authenticator_extracts_municipality_code_from_nested_payload() -> None:
-    class NestedPayloadClient:
-        def introspect(
-            self,
-            *,
-            url: str,
-            authorization_header: str,
-            timeout_seconds: int,
-        ) -> dict[str, object]:
-            del url, authorization_header, timeout_seconds
-            return {
-                "data": {
-                    "user": {
-                        "id": 7,
-                        "full_name": "Nested User",
-                        "municipality": {
-                            "code": "zarand",
-                            "name": "Zarand",
-                        },
-                    }
-                }
-            }
-
-    authenticator = _build_remote_authenticator(NestedPayloadClient())
-
-    user = authenticator.authenticate("nested-token")
-
-    assert user.user_id == 7
-    assert user.user_name == "Nested User"
-    assert user.municipality_code == "zarand"
-    assert user.municipality == {"code": "zarand", "name": "Zarand"}

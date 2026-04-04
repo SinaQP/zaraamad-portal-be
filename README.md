@@ -124,11 +124,6 @@ Key environment variables:
 - `OTP_REQUEST_LIMIT_COUNT`: request limit per rate window
 - `OTP_REQUEST_LIMIT_WINDOW_SECONDS`: OTP rate-limit window
 - `OTP_DEV_MODE`: if `true`, API returns `dev_otp` in OTP response
-- `AUTH_INTROSPECTION_URL`: legacy Zaraamad authenticated-user endpoint used for remote bearer token introspection
-- `AUTH_INTROSPECTION_TIMEOUT`: timeout in seconds for remote introspection requests
-- `AUTH_INTROSPECTION_CACHE_TTL`: success-cache TTL in seconds for remote introspection by bearer token hash
-- `AUTH_INTROSPECTION_FAIL_OPEN`: unsafe escape hatch that bypasses remote introspection failures when explicitly enabled
-- `IS_FORM_ADMIN`: allows authenticated remote users to call form admin endpoints when set to `true`
 - `SMS_API_URL`: SMS provider endpoint
 - `SMS_REQUEST_TIMEOUT_SECONDS`: SMS request timeout
 - `BRIDGE_API_KEY`: shared secret used for bridge-authenticated API access
@@ -318,19 +313,16 @@ Forms:
 
 ## Form Service
 
-### Remote auth
+### Access
 
-The form endpoints accept the existing Zaraamad bearer token and validate it remotely through `AUTH_INTROSPECTION_URL`. Successful introspection responses are cached for `AUTH_INTROSPECTION_CACHE_TTL` seconds by token hash. The resolved auth context keeps `user_id`, `user_name`, `municipality_code`, and `municipality`.
-
-Write endpoints under `/api/admin/*` require authenticated remote form-admin access. If `IS_FORM_ADMIN=true`, any authenticated remote user can use those endpoints. Otherwise the introspection payload must indicate form-admin access through admin/staff flags, role, or permissions.
+The form endpoints currently do not enforce a dedicated form authentication layer.
 
 ### Resolution
 
 `GET /api/forms/{key}/resolved/` resolves forms in this order:
 
-1. active municipality-scoped form for the authenticated user municipality
-2. active municipality-scoped form for the `municipality_code` query parameter
-3. active global form with the same key
+1. active municipality-scoped form for the `municipality_code` query parameter
+2. active global form with the same key
 
 Read responses return top-level fields under `fields`, and compound parent fields expose nested children under `sub_fields`.
 
