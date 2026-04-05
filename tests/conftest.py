@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.common import model_registry as _model_registry
+from app.common.config import get_settings
 from app.common.database import Base, get_db_session
 from app.main import app
 
@@ -27,6 +28,17 @@ def engine():
         cursor.close()
 
     return sqlite_engine
+
+
+@pytest.fixture(autouse=True)
+def configure_test_settings(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("JWT_SIGNING_KEY", "test-signing-key")
+    monkeypatch.setenv("JWT_ALGORITHM", "HS256")
+    monkeypatch.setenv("JWT_ISSUER", "zaraamad-django")
+    monkeypatch.delenv("JWT_AUDIENCE", raising=False)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture()

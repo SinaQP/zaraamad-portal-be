@@ -15,6 +15,7 @@ from app.common.messages import (
 from app.modules.customers.schemas import Customer
 from app.modules.service_catalog.schemas import CustomerServiceConfig
 from app.modules.users.schemas import User
+from tests.auth_utils import token_for_mobile
 
 
 def _create_customer_entity(db_session: Session) -> Customer:
@@ -58,13 +59,8 @@ def _create_customer_user(db_session: Session, customer_id: int) -> User:
 
 
 def _login(client: TestClient, mobile: str) -> str:
-    request_response = client.post("/auth/request-otp", json={"mobile": mobile})
-    otp_code = request_response.json()["dev_otp"]
-    verify_response = client.post(
-        "/auth/verify-otp",
-        json={"mobile": mobile, "otp_code": otp_code},
-    )
-    return verify_response.json()["access_token"]
+    del client
+    return token_for_mobile(mobile)
 
 
 def _admin_headers(client: TestClient, db_session: Session) -> dict[str, str]:

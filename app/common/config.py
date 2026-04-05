@@ -15,9 +15,13 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+psycopg://postgres:postgres@localhost:5432/zaraamad_portal"
     )
-    jwt_secret_key: str = "change-me"
+    jwt_signing_key: str = Field(
+        default="change-me",
+        validation_alias=AliasChoices("JWT_SIGNING_KEY", "JWT_SECRET_KEY"),
+    )
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 60
+    jwt_issuer: str = "zaraamad-django"
+    jwt_audience: str | None = None
     otp_expire_seconds: int = 120
     otp_request_limit_count: int = 3
     otp_request_limit_window_seconds: int = 600

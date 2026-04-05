@@ -23,8 +23,8 @@ _CUSTOM_VALUE_ERROR_TRANSLATIONS = {
 
 _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.INVALID_AUTH_TOKEN: "JWT validation failed.",
-    messages.INVALID_TOKEN_TYPE: "JWT type claim is not 'access'.",
-    messages.TOKEN_SUBJECT_MISSING: "JWT subject claim is missing.",
+    messages.INVALID_TOKEN_TYPE: "JWT token_type claim is not 'access'.",
+    messages.TOKEN_SUBJECT_MISSING: "JWT sub and user_id claims are both missing.",
     messages.TOKEN_SUBJECT_INVALID: "JWT subject claim is invalid.",
     messages.MISSING_AUTH_TOKEN: "Authorization bearer token was not provided.",
     messages.MISSING_ACCESS_CREDENTIALS: "Neither Authorization bearer token nor X-Bridge-Key was provided.",
@@ -35,6 +35,7 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.USER_INACTIVE: "Requested user is inactive.",
     messages.USER_NOT_FOUND_OR_INACTIVE: "Active user record for the provided identifier was not found.",
     messages.USER_ID_INVALID: "The supplied user_id does not exist, is inactive, or is invalid for this request.",
+    messages.LOCAL_USER_CONTEXT_REQUIRED: "The authenticated JWT could not be mapped to a local user required by this operation.",
     messages.INVALID_CREDENTIALS: "Mobile/password combination did not match an active user.",
     messages.MOBILE_ALREADY_EXISTS: "Unique constraint on user mobile was violated.",
     messages.OTP_DELIVERY_FAILED: "OTP delivery provider failed.",

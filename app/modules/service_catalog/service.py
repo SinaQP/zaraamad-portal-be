@@ -36,6 +36,7 @@ from app.common.messages import (
     SERVICE_NOT_FOUND,
     SERVICE_PROJECT_NOT_FOUND,
     SUPPORT_PRICE_CANNOT_BE_NULL,
+    LOCAL_USER_CONTEXT_REQUIRED,
     USER_ID_INVALID,
 )
 from app.common.pagination import PaginationMeta, PaginationParams
@@ -776,6 +777,7 @@ class CustomerScopedAccessPolicy:
         current_user: CurrentUser,
         customer_id: int,
     ) -> None:
+        role_label = current_user.role.value if current_user.role is not None else "unknown"
         if current_user.role == UserRole.ADMIN:
             return
         has_customer_access = (
@@ -789,7 +791,7 @@ class CustomerScopedAccessPolicy:
             detail={
                 "message": CUSTOMER_ACCESS_DENIED,
                 "developer_message": (
-                    f"User {current_user.id} with role {current_user.role.value} "
+                    f"User {current_user.user_id} with role {role_label} "
                     f"cannot access customer {customer_id}."
                 ),
             },
@@ -1016,6 +1018,11 @@ class CustomerServicePurchaseService:
         dto: CustomerServicePurchaseCreate,
         current_user: CurrentUser,
     ) -> CustomerServicePurchaseDetails:
+        if current_user.id is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=LOCAL_USER_CONTEXT_REQUIRED,
+            )
         self._customer_lookup_service.get_active_or_404(customer_id=customer_id)
         self._access_policy.validate_customer_access(
             current_user=current_user,

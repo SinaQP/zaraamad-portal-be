@@ -6,11 +6,12 @@ from app.common.formatters.jalali_datetime import gregorian_datetime_to_jalali_d
 from app.common.messages import (
     ADMIN_ACCESS_REQUIRED,
     CUSTOMER_ID_REQUIRED,
-    INVALID_CREDENTIALS,
     VALIDATION_ERROR_MESSAGE,
 )
+from app.common.security.password_service import get_password_service
 from app.modules.customers.schemas import Customer
 from app.modules.users.schemas import User
+from tests.auth_utils import token_for_mobile
 
 
 def _create_admin(db_session: Session) -> User:
@@ -28,13 +29,8 @@ def _create_admin(db_session: Session) -> User:
 
 
 def _login(client: TestClient, mobile: str) -> str:
-    otp_response = client.post("/auth/request-otp", json={"mobile": mobile})
-    otp_code = otp_response.json()["dev_otp"]
-    verify_response = client.post(
-        "/auth/verify-otp",
-        json={"mobile": mobile, "otp_code": otp_code},
-    )
-    return verify_response.json()["access_token"]
+    del client
+    return token_for_mobile(mobile)
 
 
 def test_admin_can_manage_customers_and_users(client: TestClient, db_session: Session) -> None:
@@ -442,6 +438,7 @@ def test_admin_can_update_user_password_and_user_can_login_with_new_password(
     admin = _create_admin(db_session=db_session)
     admin_token = _login(client=client, mobile=admin.mobile)
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    password_service = get_password_service()
 
     create_response = client.post(
         "/users",
@@ -455,12 +452,9 @@ def test_admin_can_update_user_password_and_user_can_login_with_new_password(
     )
     assert create_response.status_code == 201
     user_id = create_response.json()["id"]
-
-    initial_login = client.post(
-        "/auth/login",
-        json={"mobile": "09128889900", "password": "initial-password"},
-    )
-    assert initial_login.status_code == 200
+    user = db_session.get(User, user_id)
+    assert user is not None
+    assert password_service.verify_password("initial-password", user.password)
 
     update_response = client.patch(
         f"/users/{user_id}",
@@ -468,19 +462,11 @@ def test_admin_can_update_user_password_and_user_can_login_with_new_password(
         json={"password": "new-password"},
     )
     assert update_response.status_code == 200
-
-    old_password_response = client.post(
-        "/auth/login",
-        json={"mobile": "09128889900", "password": "initial-password"},
-    )
-    assert old_password_response.status_code == 401
-    assert old_password_response.json()["message"] == INVALID_CREDENTIALS
-
-    new_password_response = client.post(
-        "/auth/login",
-        json={"mobile": "09128889900", "password": "new-password"},
-    )
-    assert new_password_response.status_code == 200
+    db_session.refresh(user)
+    assert user.password is not None
+    assert user.password.startswith("pbkdf2_sha256$")
+    assert not password_service.verify_password("initial-password", user.password)
+    assert password_service.verify_password("new-password", user.password)
 
 
 def test_empty_password_in_patch_does_not_clear_existing_user_password(
@@ -490,6 +476,7 @@ def test_empty_password_in_patch_does_not_clear_existing_user_password(
     admin = _create_admin(db_session=db_session)
     admin_token = _login(client=client, mobile=admin.mobile)
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    password_service = get_password_service()
 
     create_response = client.post(
         "/users",
@@ -503,6 +490,9 @@ def test_empty_password_in_patch_does_not_clear_existing_user_password(
     )
     assert create_response.status_code == 201
     user_id = create_response.json()["id"]
+    user = db_session.get(User, user_id)
+    assert user is not None
+    initial_password_hash = user.password
 
     update_response = client.patch(
         f"/users/{user_id}",
@@ -511,9 +501,6 @@ def test_empty_password_in_patch_does_not_clear_existing_user_password(
     )
     assert update_response.status_code == 200
     assert update_response.json()["full_name"] == "Password User Updated"
-
-    login_response = client.post(
-        "/auth/login",
-        json={"mobile": "09128889901", "password": "stable-password"},
-    )
-    assert login_response.status_code == 200
+    db_session.refresh(user)
+    assert user.password == initial_password_hash
+    assert password_service.verify_password("stable-password", user.password)

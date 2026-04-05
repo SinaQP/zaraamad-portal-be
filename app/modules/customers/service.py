@@ -472,6 +472,7 @@ class CustomerScopedAccessPolicy:
         current_user: CurrentUser,
         customer_id: int,
     ) -> None:
+        role_label = current_user.role.value if current_user.role is not None else "unknown"
         if current_user.role == UserRole.ADMIN:
             return
         has_customer_access = (
@@ -485,7 +486,7 @@ class CustomerScopedAccessPolicy:
             detail={
                 "message": CUSTOMER_ACCESS_DENIED,
                 "developer_message": (
-                    f"User {current_user.id} with role {current_user.role.value} "
+                    f"User {current_user.user_id} with role {role_label} "
                     f"cannot access customer {customer_id}."
                 ),
             },

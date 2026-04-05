@@ -1,52 +1,55 @@
-from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from collections.abc import Mapping
+from typing import Any
 
 from jose import JWTError, jwt
+from jose.exceptions import ExpiredSignatureError, JWTClaimsError
 
 from app.common.config import get_settings
-from app.common.enums import UserRole
 from app.common.messages import INVALID_AUTH_TOKEN, INVALID_TOKEN_TYPE
 
 
 class JWTService:
     def __init__(
         self,
-        secret_key: str,
+        *,
+        signing_key: str,
         algorithm: str,
-        access_token_expire_minutes: int,
+        issuer: str,
+        audience: str | None,
     ) -> None:
-        self._secret_key = secret_key
+        self._signing_key = signing_key
         self._algorithm = algorithm
-        self._access_token_expire_minutes = access_token_expire_minutes
+        self._issuer = issuer
+        self._audience = audience.strip() if audience else None
 
-    def create_access_token(self, user_id: int, mobile: str, role: UserRole) -> str:
-        now = datetime.now(UTC)
-        payload = {
-            "sub": str(user_id),
-            "mobile": mobile,
-            "role": role.value,
-            "iat": int(now.timestamp()),
-            "exp": int((now + timedelta(minutes=self._access_token_expire_minutes)).timestamp()),
-            "jti": str(uuid4()),
-            "type": "access",
+    def decode_access_token(self, token: str) -> dict[str, Any]:
+        decode_kwargs: dict[str, Any] = {
+            "key": self._signing_key,
+            "algorithms": [self._algorithm],
+            "issuer": self._issuer,
+            "options": {
+                "verify_aud": self._audience is not None,
+            },
         }
-        return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
-
-    def decode_access_token(self, token: str) -> dict[str, str | int]:
+        if self._audience is not None:
+            decode_kwargs["audience"] = self._audience
         try:
-            payload = jwt.decode(token, self._secret_key, algorithms=[self._algorithm])
-        except JWTError as exc:
+            payload = jwt.decode(token, **decode_kwargs)
+        except (ExpiredSignatureError, JWTClaimsError, JWTError) as exc:
             raise ValueError(INVALID_AUTH_TOKEN) from exc
-        token_type = payload.get("type")
+        if not isinstance(payload, Mapping):
+            raise ValueError(INVALID_AUTH_TOKEN)
+        token_type = payload.get("token_type")
         if token_type != "access":
             raise ValueError(INVALID_TOKEN_TYPE)
-        return payload
+        return dict(payload)
 
 
 def get_jwt_service() -> JWTService:
     settings = get_settings()
     return JWTService(
-        secret_key=settings.jwt_secret_key,
+        signing_key=settings.jwt_signing_key,
         algorithm=settings.jwt_algorithm,
-        access_token_expire_minutes=settings.jwt_access_token_expire_minutes,
+        issuer=settings.jwt_issuer,
+        audience=settings.jwt_audience,
     )

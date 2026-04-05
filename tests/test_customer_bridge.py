@@ -24,6 +24,7 @@ from app.common.services.bridge_client import (
 )
 from app.main import app
 from app.modules.users.schemas import User
+from tests.auth_utils import token_for_mobile
 
 
 class RecordingBridgeClient:
@@ -330,13 +331,8 @@ def _create_admin(db_session: Session) -> User:
 
 
 def _login(client: TestClient, mobile: str) -> str:
-    otp_response = client.post("/auth/request-otp", json={"mobile": mobile})
-    otp_code = otp_response.json()["dev_otp"]
-    verify_response = client.post(
-        "/auth/verify-otp",
-        json={"mobile": mobile, "otp_code": otp_code},
-    )
-    return verify_response.json()["access_token"]
+    del client
+    return token_for_mobile(mobile)
 
 
 def _admin_headers(client: TestClient, db_session: Session) -> dict[str, str]:

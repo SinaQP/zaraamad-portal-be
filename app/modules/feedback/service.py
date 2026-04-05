@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.common.database import get_db_session
 from app.common.dtos import CurrentUser
 from app.common.enums import SortOrder
-from app.common.messages import DATA_INTEGRITY_ERROR
+from app.common.messages import DATA_INTEGRITY_ERROR, LOCAL_USER_CONTEXT_REQUIRED
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.modules.feedback.dtos import FeedbackCreate
 from app.modules.feedback.schemas import Feedback
@@ -60,6 +60,11 @@ class FeedbackService:
         dto: FeedbackCreate,
         current_user: CurrentUser,
     ) -> Feedback:
+        if current_user.id is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=LOCAL_USER_CONTEXT_REQUIRED,
+            )
         feedback = Feedback(
             user_id=current_user.id,
             message=dto.message,

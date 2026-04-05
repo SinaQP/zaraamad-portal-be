@@ -8,9 +8,8 @@ Current release: `1.1.0`
 
 This backend currently provides:
 
-- OTP-based login
-- JWT access authentication
-- Form schema service with municipality-aware resolution and remote token introspection
+- Django-issued JWT access-token verification
+- Form schema service with municipality-aware resolution
 - Customer management
 - Customer income summary and bucket import
 - User management
@@ -25,7 +24,6 @@ Main domain changes now active in the codebase:
 
 - organization resources use `customer`
 - customer users are linked with `customer_id`
-- OTP delivery supports development mode and SMS panel integration
 
 ## Tech Stack
 
@@ -117,15 +115,10 @@ Key environment variables:
 - `APP_ENV`: environment label such as `development`
 - `DATABASE_URL`: database connection string
 - `FORM_SERVICE_DEBUG`: toggle extra form-service diagnostics when needed
-- `JWT_SECRET_KEY`: JWT signing secret
-- `JWT_ALGORITHM`: JWT signing algorithm
-- `JWT_ACCESS_TOKEN_EXPIRE_MINUTES`: access token lifetime
-- `OTP_EXPIRE_SECONDS`: OTP lifetime in seconds
-- `OTP_REQUEST_LIMIT_COUNT`: request limit per rate window
-- `OTP_REQUEST_LIMIT_WINDOW_SECONDS`: OTP rate-limit window
-- `OTP_DEV_MODE`: if `true`, API returns `dev_otp` in OTP response
-- `SMS_API_URL`: SMS provider endpoint
-- `SMS_REQUEST_TIMEOUT_SECONDS`: SMS request timeout
+- `JWT_SIGNING_KEY`: shared HS256 signing key used by Django and FastAPI
+- `JWT_ALGORITHM`: JWT signing algorithm, default `HS256`
+- `JWT_ISSUER`: expected issuer, default `zaraamad-django`
+- `JWT_AUDIENCE`: optional audience claim to verify when set
 - `BRIDGE_API_KEY`: shared secret used for bridge-authenticated API access
 - `SMS_PANEL_ORGANIZATION`: SMS panel organization
 - `SMS_PANEL_USERNAME`: SMS panel username
@@ -171,21 +164,44 @@ python scripts/build_version.py
 
 ## Authentication
 
-Flow:
+FastAPI does not issue login, OTP, refresh, or access tokens in this phase.
 
-1. Create or seed an active user.
-2. Call `POST /auth/request-otp`.
-3. In development mode, read `dev_otp` from the response.
-4. Call `POST /auth/verify-otp`.
-5. Use the returned bearer token for protected endpoints.
-6. Call `GET /auth/me` to fetch the authenticated user profile.
+It only verifies the bearer access token issued by the Django system:
 
-OTP delivery modes:
+- Header: `Authorization: Bearer <token>`
+- Algorithm: `HS256`
+- Key: `JWT_SIGNING_KEY`
+- Issuer: `JWT_ISSUER` and defaults to `zaraamad-django`
+- Audience: verified only when `JWT_AUDIENCE` is configured
 
-- `OTP_DEV_MODE=true`: OTP is returned in API response for local development
-- `OTP_DEV_MODE=false`: OTP is sent through the configured SMS panel
+Expected access-token claims:
 
-If SMS mode is enabled and panel configuration is missing or delivery fails, the API returns structured `500` or `503` responses.
+- `token_type`
+- `exp`
+- `iat`
+- `jti`
+- `user_id`
+- `sub`
+- `roles`
+- `security_stamp`
+- `iss`
+
+Use `GET /auth/me` to validate the token and inspect the resolved auth context.
+
+Example response:
+
+```json
+{
+  "user_id": "11111111-1111-1111-1111-111111111111",
+  "sub": "11111111-1111-1111-1111-111111111111",
+  "roles": ["Admin", "Operator"],
+  "security_stamp": "stamp-123",
+  "raw_claims": {
+    "token_type": "access",
+    "iss": "zaraamad-django"
+  }
+}
+```
 
 ## Error Response Format
 
