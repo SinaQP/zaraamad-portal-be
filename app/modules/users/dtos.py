@@ -4,7 +4,11 @@ from pydantic import Field, field_validator, model_validator
 
 from app.common.dtos import MongoDTO, WithId
 from app.common.enums import UserRole
-from app.common.messages import CUSTOMER_ID_REQUIRED
+from app.common.messages import (
+    CUSTOMER_ID_REQUIRED,
+    ORGANIZATION_NAME_REQUIRED,
+    ORGANIZATION_TYPE_REQUIRED,
+)
 from app.common.pagination import PaginatedResponse
 from app.common.validators.mobile_validator import get_mobile_validator
 
@@ -18,6 +22,16 @@ class UserPayloadBase(MongoDTO):
         description="Customer id for customer users.",
         examples=[1],
     )
+    organization_name: str | None = Field(
+        default=None,
+        description="Organization name for public users.",
+        examples=["Tehran Tech Association"],
+    )
+    organization_type: str | None = Field(
+        default=None,
+        description="Organization type for public users.",
+        examples=["private"],
+    )
 
     @field_validator("mobile")
     @classmethod
@@ -28,8 +42,15 @@ class UserPayloadBase(MongoDTO):
     def validate_role_constraints(self) -> "UserPayloadBase":
         if self.role == UserRole.CUSTOMER and self.customer_id is None:
             raise ValueError(CUSTOMER_ID_REQUIRED)
-        if self.role == UserRole.ADMIN:
+        if self.role == UserRole.PUBLIC and not self.organization_name:
+            raise ValueError(ORGANIZATION_NAME_REQUIRED)
+        if self.role == UserRole.PUBLIC and not self.organization_type:
+            raise ValueError(ORGANIZATION_TYPE_REQUIRED)
+        if self.role in {UserRole.ADMIN, UserRole.PUBLIC}:
             self.customer_id = None
+        if self.role != UserRole.PUBLIC:
+            self.organization_name = None
+            self.organization_type = None
         return self
 
 
@@ -63,6 +84,16 @@ class UserUpdate(MongoDTO):
         default=None,
         description="Customer id for customer users.",
         examples=[2],
+    )
+    organization_name: str | None = Field(
+        default=None,
+        description="Organization name for public users.",
+        examples=["Tehran Tech Association"],
+    )
+    organization_type: str | None = Field(
+        default=None,
+        description="Organization type for public users.",
+        examples=["private"],
     )
     is_active: bool | None = Field(default=None, description="User active status.", examples=[True])
 

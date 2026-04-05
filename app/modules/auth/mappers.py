@@ -3,6 +3,7 @@ from typing import Any
 
 from app.common.dtos import CurrentUser
 from app.modules.auth.dtos import AuthUserOut, AuthenticatedUserOut
+from app.modules.users.schemas import User
 
 
 class AuthMapper:
@@ -13,7 +14,21 @@ class AuthMapper:
             mobile=user_row["mobile"],
             role=user_row["role"],
             customer_id=user_row["customer_id"],
+            organization_name=user_row["organization_name"],
+            organization_type=user_row["organization_type"],
             is_active=user_row["is_active"],
+        )
+
+    def from_user(self, user: User) -> AuthenticatedUserOut:
+        return AuthenticatedUserOut(
+            id=user.id,
+            full_name=user.full_name,
+            mobile=user.mobile,
+            role=user.role,
+            customer_id=user.customer_id,
+            organization_name=user.organization_name,
+            organization_type=user.organization_type,
+            is_active=user.is_active,
         )
 
     def from_current_user(self, current_user: CurrentUser) -> AuthUserOut:

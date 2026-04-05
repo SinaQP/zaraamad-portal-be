@@ -8,12 +8,32 @@ from app.modules.auth.dtos import (
     LoginCreate,
     OtpRequestCreate,
     OtpRequestResult,
+    PublicSignUpCreate,
     OtpVerifyCreate,
 )
 from app.modules.auth.mappers import AuthMapper, get_auth_mapper
 from app.modules.auth.service import AuthService, get_auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.post(
+    "/sign-up",
+    response_model=AccessTokenOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Public user sign up",
+    description="Create a public user account and issue JWT access token.",
+    responses={
+        201: {"description": "Public user created and access token generated."},
+        409: {"description": "Mobile number already exists."},
+        422: {"description": "Validation failed."},
+    },
+)
+def sign_up(
+    payload: PublicSignUpCreate,
+    service: AuthService = Depends(get_auth_service),
+) -> AccessTokenOut:
+    return service.sign_up_public(dto=payload)
 
 
 @router.post(

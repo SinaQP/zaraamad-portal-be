@@ -9,8 +9,16 @@ class User(Base, TimestampMixin):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint(
-            "(role = 'admin' AND customer_id IS NULL) OR "
-            "(role = 'customer' AND customer_id IS NOT NULL)",
+            "("
+            "role = 'admin' AND customer_id IS NULL AND "
+            "organization_name IS NULL AND organization_type IS NULL"
+            ") OR ("
+            "role = 'customer' AND customer_id IS NOT NULL AND "
+            "organization_name IS NULL AND organization_type IS NULL"
+            ") OR ("
+            "role = 'public' AND customer_id IS NULL AND "
+            "organization_name IS NOT NULL AND organization_type IS NOT NULL"
+            ")",
             name="ck_users_role_customer",
         ),
     )
@@ -19,6 +27,8 @@ class User(Base, TimestampMixin):
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     mobile: Mapped[str] = mapped_column(String(20), nullable=False, unique=True, index=True)
     password: Mapped[str] = mapped_column(String(255), nullable=True)
+    organization_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    organization_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         Enum(
             UserRole,

@@ -18,7 +18,7 @@ router = APIRouter(prefix="/users", tags=["users"])
     response_model=UserOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create user",
-    description="Create a new user with role admin or customer. Only admin users can access this endpoint.",
+    description="Create a new user with role admin, customer, or public. Only admin users can access this endpoint.",
     responses={
         201: {"description": "User created."},
         403: {"description": "Admin access required."},
@@ -51,7 +51,10 @@ def list_users(
     role: UserRole | None = Query(default=None, description="Filter by role."),
     customer_id: int | None = Query(default=None, description="Filter by customer id."),
     is_active: bool | None = Query(default=None, description="Filter by active flag."),
-    search: str | None = Query(default=None, description="Search by user full name or mobile."),
+    search: str | None = Query(
+        default=None,
+        description="Search by user full name, mobile, or public organization fields.",
+    ),
     sort_by: Literal[
         "id",
         "full_name",

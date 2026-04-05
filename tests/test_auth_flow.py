@@ -10,6 +10,7 @@ from app.common.messages import (
     INVALID_CREDENTIALS,
     INVALID_IRANIAN_MOBILE,
     INVALID_TOKEN_TYPE,
+    MOBILE_ALREADY_EXISTS,
     MISSING_AUTH_TOKEN,
     OTP_DELIVERY_FAILED,
     OTP_INVALID,
@@ -70,6 +71,62 @@ def test_request_otp_for_unknown_user_returns_404(client: TestClient) -> None:
 
     assert response.status_code == 404
     assert response.json()["message"] == USER_NOT_FOUND_OR_INACTIVE
+
+
+def test_public_signup_creates_user_and_returns_access_token(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    response = client.post(
+        "/auth/sign-up",
+        json={
+            "full_name": "Visitor User",
+            "mobile": "09125554433",
+            "organization_name": "Rahkar Group",
+            "organization_type": "private",
+        },
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["token_type"] == "bearer"
+    assert data["user"]["full_name"] == "Visitor User"
+    assert data["user"]["role"] == UserRole.PUBLIC.value
+    assert data["user"]["customer_id"] is None
+    assert data["user"]["organization_name"] == "Rahkar Group"
+    assert data["user"]["organization_type"] == "private"
+
+    user = db_session.query(User).filter(User.mobile == "09125554433").one()
+    assert user.role == UserRole.PUBLIC
+    assert user.organization_name == "Rahkar Group"
+    assert user.organization_type == "private"
+
+    me_response = client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {data['access_token']}"},
+    )
+    assert me_response.status_code == 200
+    assert me_response.json()["roles"] == ["Public"]
+
+
+def test_public_signup_rejects_duplicate_mobile(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _create_admin(db_session=db_session)
+
+    response = client.post(
+        "/auth/sign-up",
+        json={
+            "full_name": "Duplicate Visitor",
+            "mobile": "09120000000",
+            "organization_name": "Duplicate Org",
+            "organization_type": "private",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["message"] == MOBILE_ALREADY_EXISTS
 
 
 def test_admin_can_login_with_otp_and_get_me(client: TestClient, db_session: Session) -> None:

@@ -144,6 +144,8 @@ class CurrentUserResolver:
             return UserRole.ADMIN
         if "customer" in normalized_roles:
             return UserRole.CUSTOMER
+        if "public" in normalized_roles:
+            return UserRole.PUBLIC
         return None
 
     def _as_string(self, value: Any) -> str | None:

@@ -10,6 +10,8 @@ class UserMapper:
             mobile=user.mobile,
             role=user.role,
             customer_id=user.customer_id,
+            organization_name=user.organization_name,
+            organization_type=user.organization_type,
             is_active=user.is_active,
             created_at=user.created_at,
             updated_at=user.updated_at,

@@ -3,13 +3,16 @@ from secrets import randbelow
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.common.config import Settings, get_settings
 from app.common.database import Base, get_db_session
 from app.common.enums import OtpPurpose, UserRole
 from app.common.messages import (
+    DATA_INTEGRITY_ERROR,
     INVALID_CREDENTIALS,
+    MOBILE_ALREADY_EXISTS,
     OTP_EXPIRED,
     OTP_INVALID,
     TOO_MANY_OTP_REQUESTS,
@@ -24,9 +27,11 @@ from app.modules.auth.dtos import (
     OtpRequestCreate,
     OtpRequestResult,
     OtpVerifyCreate,
+    PublicSignUpCreate,
 )
 from app.modules.auth.mappers import AuthMapper, get_auth_mapper
 from app.modules.auth.schemas import OTPCode
+from app.modules.users.schemas import User
 
 
 class OTPPolicy:
@@ -99,6 +104,25 @@ class AuthService:
             dev_otp=delivery_result.dev_otp,
         )
 
+    def sign_up_public(self, dto: PublicSignUpCreate) -> AccessTokenOut:
+        user = User(
+            full_name=dto.full_name,
+            mobile=dto.mobile,
+            role=UserRole.PUBLIC,
+            customer_id=None,
+            organization_name=dto.organization_name,
+            organization_type=dto.organization_type,
+            is_active=True,
+        )
+        self._db_session.add(user)
+        try:
+            self._db_session.commit()
+        except IntegrityError as exc:
+            self._db_session.rollback()
+            self._raise_integrity_exception(exc)
+        self._db_session.refresh(user)
+        return self._build_access_token_response_for_user(user=user)
+
     def verify_otp(self, dto: OtpVerifyCreate) -> AccessTokenOut:
         otp_record = self._get_latest_unused_otp(
             mobile=dto.mobile,
@@ -122,17 +146,8 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=USER_NOT_FOUND_OR_INACTIVE,
             )
-        access_token = self._jwt_service.create_access_token(
-            user_id=user_row["id"],
-            mobile=user_row["mobile"],
-            role=UserRole(user_row["role"]),
-        )
         self._db_session.commit()
-        return AccessTokenOut(
-            access_token=access_token,
-            token_type="bearer",
-            user=self._mapper.from_user_row(user_row=user_row),
-        )
+        return self._build_access_token_response_for_user_row(user_row=user_row)
 
     def login(self, dto: LoginCreate) -> AccessTokenOut:
         user_row = self._get_active_user_by_mobile(mobile=dto.mobile)
@@ -151,16 +166,7 @@ class AuthService:
             )
         if self._password_service.is_legacy_plaintext_password(user_row["password"]):
             self._upgrade_legacy_password(user_id=user_row["id"], password=dto.password)
-        access_token = self._jwt_service.create_access_token(
-            user_id=user_row["id"],
-            mobile=user_row["mobile"],
-            role=UserRole(user_row["role"]),
-        )
-        return AccessTokenOut(
-            access_token=access_token,
-            token_type="bearer",
-            user=self._mapper.from_user_row(user_row=user_row),
-        )
+        return self._build_access_token_response_for_user_row(user_row=user_row)
 
     def _get_active_user_by_mobile(self, *, mobile: str):
         user_table = Base.metadata.tables["users"]
@@ -171,6 +177,8 @@ class AuthService:
                 user_table.c.mobile,
                 user_table.c.role,
                 user_table.c.customer_id,
+                user_table.c.organization_name,
+                user_table.c.organization_type,
                 user_table.c.is_active,
                 user_table.c.password,
             ).where(
@@ -234,6 +242,42 @@ class AuthService:
             expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=UTC)
         )
         return normalized_expires_at <= datetime.now(UTC)
+
+    def _build_access_token_response_for_user_row(self, *, user_row) -> AccessTokenOut:
+        access_token = self._jwt_service.create_access_token(
+            user_id=user_row["id"],
+            mobile=user_row["mobile"],
+            role=UserRole(user_row["role"]),
+        )
+        return AccessTokenOut(
+            access_token=access_token,
+            token_type="bearer",
+            user=self._mapper.from_user_row(user_row=user_row),
+        )
+
+    def _build_access_token_response_for_user(self, *, user: User) -> AccessTokenOut:
+        access_token = self._jwt_service.create_access_token(
+            user_id=user.id,
+            mobile=user.mobile,
+            role=user.role,
+        )
+        return AccessTokenOut(
+            access_token=access_token,
+            token_type="bearer",
+            user=self._mapper.from_user(user=user),
+        )
+
+    def _raise_integrity_exception(self, exc: Exception) -> None:
+        error_text = str(getattr(exc, "orig", exc)).lower()
+        if "mobile" in error_text:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=MOBILE_ALREADY_EXISTS,
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=DATA_INTEGRITY_ERROR,
+        ) from exc
 
 
 def get_auth_service(

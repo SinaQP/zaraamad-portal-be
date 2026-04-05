@@ -160,6 +160,35 @@ def test_admin_can_create_admin_without_customer_id(
     assert response.status_code == 201
     assert response.json()["role"] == UserRole.ADMIN.value
     assert response.json()["customer_id"] is None
+    assert response.json()["organization_name"] is None
+    assert response.json()["organization_type"] is None
+
+
+def test_admin_can_create_public_user_without_customer_id(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin = _create_admin(db_session=db_session)
+    admin_token = _login(client=client, mobile=admin.mobile)
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    response = client.post(
+        "/users",
+        headers=admin_headers,
+        json={
+            "full_name": "Public Visitor",
+            "mobile": "09127778898",
+            "role": UserRole.PUBLIC.value,
+            "organization_name": "Urban Lab",
+            "organization_type": "municipality",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["role"] == UserRole.PUBLIC.value
+    assert response.json()["customer_id"] is None
+    assert response.json()["organization_name"] == "Urban Lab"
+    assert response.json()["organization_type"] == "municipality"
 
 
 def test_users_list_supports_search_sort_and_pagination(
@@ -350,6 +379,37 @@ def test_customer_cannot_access_admin_endpoints(client: TestClient, db_session: 
     response = client.post(
         "/customers",
         headers=customer_headers,
+        json={
+            "name": "Should Fail",
+            "grade": 3,
+        },
+    )
+    assert response.status_code == 403
+    assert response.json()["message"] == ADMIN_ACCESS_REQUIRED
+    assert response.json()["detail"] == ADMIN_ACCESS_REQUIRED
+    assert response.json()["developer_message"] == "Authenticated user does not have admin role."
+
+
+def test_public_user_cannot_access_admin_endpoints(client: TestClient, db_session: Session) -> None:
+    public_user = User(
+        full_name="Public User",
+        mobile="09123334456",
+        role=UserRole.PUBLIC,
+        customer_id=None,
+        organization_name="Civic Lab",
+        organization_type="private",
+        is_active=True,
+    )
+    db_session.add(public_user)
+    db_session.commit()
+    db_session.refresh(public_user)
+
+    public_token = _login(client=client, mobile=public_user.mobile)
+    public_headers = {"Authorization": f"Bearer {public_token}"}
+
+    response = client.post(
+        "/customers",
+        headers=public_headers,
         json={
             "name": "Should Fail",
             "grade": 3,

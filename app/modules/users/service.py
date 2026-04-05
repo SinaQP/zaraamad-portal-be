@@ -11,6 +11,8 @@ from app.common.messages import (
     DATA_INTEGRITY_ERROR,
     MOBILE_ALREADY_EXISTS,
     CUSTOMER_ID_INVALID_OR_INACTIVE,
+    ORGANIZATION_NAME_REQUIRED,
+    ORGANIZATION_TYPE_REQUIRED,
     USER_NOT_FOUND,
 )
 from app.common.pagination import PaginationMeta, PaginationParams
@@ -54,6 +56,8 @@ class UserQueryBuilder:
                 or_(
                     User.full_name.ilike(search_pattern),
                     User.mobile.ilike(search_pattern),
+                    User.organization_name.ilike(search_pattern),
+                    User.organization_type.ilike(search_pattern),
                 )
             )
         sort_column = self.SORT_COLUMNS[sort_by]
@@ -68,12 +72,36 @@ class UserRolePolicy:
     def __init__(self, db_session: Session) -> None:
         self._db_session = db_session
 
-    def resolve_customer_id(
+    def resolve_profile(
         self,
+        *,
+        role: UserRole,
+        customer_id: int | None,
+        organization_name: str | None,
+        organization_type: str | None,
+    ) -> tuple[int | None, str | None, str | None]:
+        resolved_customer_id = self._resolve_customer_id(
+            role=role,
+            customer_id=customer_id,
+        )
+        resolved_organization_name, resolved_organization_type = self._resolve_organization_fields(
+            role=role,
+            organization_name=organization_name,
+            organization_type=organization_type,
+        )
+        return (
+            resolved_customer_id,
+            resolved_organization_name,
+            resolved_organization_type,
+        )
+
+    def _resolve_customer_id(
+        self,
+        *,
         role: UserRole,
         customer_id: int | None,
     ) -> int | None:
-        if role == UserRole.ADMIN:
+        if role in {UserRole.ADMIN, UserRole.PUBLIC}:
             return None
         if customer_id is None:
             raise HTTPException(
@@ -94,6 +122,29 @@ class UserRolePolicy:
             )
         return customer_id
 
+    def _resolve_organization_fields(
+        self,
+        *,
+        role: UserRole,
+        organization_name: str | None,
+        organization_type: str | None,
+    ) -> tuple[str | None, str | None]:
+        if role != UserRole.PUBLIC:
+            return None, None
+        normalized_organization_name = organization_name.strip() if organization_name else None
+        normalized_organization_type = organization_type.strip() if organization_type else None
+        if not normalized_organization_name:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=ORGANIZATION_NAME_REQUIRED,
+            )
+        if not normalized_organization_type:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=ORGANIZATION_TYPE_REQUIRED,
+            )
+        return normalized_organization_name, normalized_organization_type
+
 
 class UserService:
     def __init__(self, db_session: Session, password_service: PasswordService) -> None:
@@ -103,15 +154,19 @@ class UserService:
         self._role_policy = UserRolePolicy(db_session=db_session)
 
     def create(self, dto: UserCreate) -> User:
-        customer_id = self._role_policy.resolve_customer_id(
+        customer_id, organization_name, organization_type = self._role_policy.resolve_profile(
             role=dto.role,
             customer_id=dto.customer_id,
+            organization_name=dto.organization_name,
+            organization_type=dto.organization_type,
         )
         user = User(
             full_name=dto.full_name,
             mobile=dto.mobile,
             role=dto.role,
             customer_id=customer_id,
+            organization_name=organization_name,
+            organization_type=organization_type,
             password=self._hash_password(dto.password),
             is_active=True,
         )
@@ -184,16 +239,30 @@ class UserService:
             if "customer_id" in update_data
             else user.customer_id
         )
-        customer_id = self._role_policy.resolve_customer_id(
+        raw_organization_name = (
+            update_data["organization_name"]
+            if "organization_name" in update_data
+            else user.organization_name
+        )
+        raw_organization_type = (
+            update_data["organization_type"]
+            if "organization_type" in update_data
+            else user.organization_type
+        )
+        customer_id, organization_name, organization_type = self._role_policy.resolve_profile(
             role=target_role,
             customer_id=raw_customer_id,
+            organization_name=raw_organization_name if raw_organization_name is None else str(raw_organization_name),
+            organization_type=raw_organization_type if raw_organization_type is None else str(raw_organization_type),
         )
         for field_name, field_value in update_data.items():
-            if field_name in {"customer_id", "password"}:
+            if field_name in {"customer_id", "organization_name", "organization_type", "password"}:
                 continue
             setattr(user, field_name, field_value)
         user.role = target_role
         user.customer_id = customer_id
+        user.organization_name = organization_name
+        user.organization_type = organization_type
         if password is not None:
             user.password = password
         try:

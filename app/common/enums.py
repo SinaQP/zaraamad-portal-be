@@ -4,6 +4,7 @@ from enum import Enum
 class UserRole(str, Enum):
     ADMIN = "admin"
     CUSTOMER = "customer"
+    PUBLIC = "public"
 
 
 class OtpPurpose(str, Enum):

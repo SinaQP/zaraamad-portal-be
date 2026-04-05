@@ -89,6 +89,8 @@ def role_claims_for_user(user: User) -> list[str]:
         return ["Admin"]
     if user.role == UserRole.CUSTOMER:
         return ["Customer"]
+    if user.role == UserRole.PUBLIC:
+        return ["Public"]
     return []
 
 

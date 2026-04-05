@@ -70,6 +70,22 @@ class OtpVerifyCreate(OtpVerifyBase):
     pass
 
 
+class PublicSignUpCreate(OtpRequestBase):
+    full_name: str = Field(..., min_length=1, description="User full name.", examples=["Ali Rezaei"])
+    organization_name: str = Field(
+        ...,
+        min_length=1,
+        description="Organization name.",
+        examples=["Tehran Tech Association"],
+    )
+    organization_type: str = Field(
+        ...,
+        min_length=1,
+        description="Organization type.",
+        examples=["private"],
+    )
+
+
 class AuthenticatedUserOut(WithId):
     full_name: str = Field(..., description="User full name.", examples=["Ali Rezaei"])
     mobile: str = Field(..., description="Iranian mobile number.", examples=["09121234567"])
@@ -78,6 +94,16 @@ class AuthenticatedUserOut(WithId):
         default=None,
         description="Customer id for customer users.",
         examples=[1],
+    )
+    organization_name: str | None = Field(
+        default=None,
+        description="Organization name for public users.",
+        examples=["Tehran Tech Association"],
+    )
+    organization_type: str | None = Field(
+        default=None,
+        description="Organization type for public users.",
+        examples=["private"],
     )
     is_active: bool = Field(..., description="User active status.", examples=[True])
 

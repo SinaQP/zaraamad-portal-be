@@ -76,6 +76,8 @@ class JWTService:
             return "Admin"
         if role == UserRole.CUSTOMER:
             return "Customer"
+        if role == UserRole.PUBLIC:
+            return "Public"
         return role.value
 
 
