@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_issuer: str = "zaraamad-django"
     jwt_audience: str | None = None
+    jwt_access_token_expire_minutes: int = 60
     otp_expire_seconds: int = 120
     otp_request_limit_count: int = 3
     otp_request_limit_window_seconds: int = 600
