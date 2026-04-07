@@ -1,0 +1,3 @@
+SYNC_STATUS_IN_PROGRESS = "in_progress"
+SYNC_STATUS_SUCCESS = "success"
+SYNC_STATUS_FAILED = "failed"

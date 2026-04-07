@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
+from app.common.security.dependencies import require_admin, require_admin_or_bridge_access
+
 from app.modules.forms.constants import FormScopeType
 from app.modules.forms.dtos import (
     FormFieldCreate,
@@ -23,17 +25,30 @@ FORMS_TAG = "forms"
 FORMS_ADMIN_TAG = "form-admin"
 
 router = APIRouter()
-forms_router = APIRouter(prefix="/api/forms", tags=[FORMS_TAG])
-forms_admin_router = APIRouter(prefix="/api/admin", tags=[FORMS_ADMIN_TAG])
+forms_router = APIRouter(
+    prefix="/api/forms",
+    tags=[FORMS_TAG],
+    dependencies=[Depends(require_admin_or_bridge_access)],
+)
+forms_admin_router = APIRouter(
+    prefix="/api/admin",
+    tags=[FORMS_ADMIN_TAG],
+    dependencies=[Depends(require_admin)],
+)
 
 
 @forms_router.get(
     "/",
     response_model=list[FormSchemaOut],
     summary="List forms",
-    description="Return form schemas with nested fields and optional scope filtering.",
+    description=(
+        "Return form schemas with nested fields and optional scope filtering. "
+        "Accessible by admin users or bridge-authenticated clients."
+    ),
     responses={
         200: {"description": "Form schemas returned."},
+        401: {"description": "Authorization bearer token or valid X-Bridge-Key is required."},
+        403: {"description": "Admin access required for JWT-authenticated users."},
     },
 )
 def list_forms(
@@ -61,11 +76,14 @@ def list_forms(
     summary="Resolve form by key",
     description=(
         "Resolve the active municipality-scoped form for the provided municipality code, "
-        "then fallback to the active global form with the same key."
+        "then fallback to the active global form with the same key. "
+        "Accessible by admin users or bridge-authenticated clients."
     ),
     responses={
         200: {"description": "Resolved form returned."},
         404: {"description": "Form was not found."},
+        401: {"description": "Authorization bearer token or valid X-Bridge-Key is required."},
+        403: {"description": "Admin access required for JWT-authenticated users."},
     },
 )
 def resolve_form(
@@ -85,9 +103,14 @@ def resolve_form(
     "/{key}/",
     response_model=list[FormSchemaOut],
     summary="Get forms by key",
-    description="Return active form schemas for the provided key and optional scope filters.",
+    description=(
+        "Return active form schemas for the provided key and optional scope filters. "
+        "Accessible by admin users or bridge-authenticated clients."
+    ),
     responses={
         200: {"description": "Matching forms returned."},
+        401: {"description": "Authorization bearer token or valid X-Bridge-Key is required."},
+        403: {"description": "Admin access required for JWT-authenticated users."},
     },
 )
 def get_forms_by_key(
@@ -112,9 +135,11 @@ def get_forms_by_key(
     response_model=FormSchemaOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create form schema",
-    description="Create a form schema record.",
+    description="Create a form schema record. Only admin users can access this endpoint.",
     responses={
         201: {"description": "Form schema created."},
+        401: {"description": "Authorization bearer token is required."},
+        403: {"description": "Admin access required."},
         409: {"description": "Data integrity error."},
     },
 )
@@ -131,9 +156,11 @@ def create_form(
     "/forms/{form_id}/",
     response_model=FormSchemaOut,
     summary="Update form schema",
-    description="Update a form schema record by id.",
+    description="Update a form schema record by id. Only admin users can access this endpoint.",
     responses={
         200: {"description": "Form schema updated."},
+        401: {"description": "Authorization bearer token is required."},
+        403: {"description": "Admin access required."},
         404: {"description": "Form schema was not found."},
         409: {"description": "Data integrity error."},
     },
@@ -152,9 +179,11 @@ def update_form(
     "/forms/{form_id}/",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete form schema",
-    description="Delete a form schema and all of its fields.",
+    description="Delete a form schema and all of its fields. Only admin users can access this endpoint.",
     responses={
         204: {"description": "Form schema deleted."},
+        401: {"description": "Authorization bearer token is required."},
+        403: {"description": "Admin access required."},
         404: {"description": "Form schema was not found."},
     },
 )
@@ -171,9 +200,14 @@ def delete_form(
     response_model=FormFieldOut,
     status_code=status.HTTP_201_CREATED,
     summary="Create form field",
-    description="Create a field under a form or parent field, optionally with nested sub-fields.",
+    description=(
+        "Create a field under a form or parent field, optionally with nested sub-fields. "
+        "Only admin users can access this endpoint."
+    ),
     responses={
         201: {"description": "Form field created."},
+        401: {"description": "Authorization bearer token is required."},
+        403: {"description": "Admin access required."},
         404: {"description": "Form or parent field was not found."},
         409: {"description": "Data integrity error."},
     },
@@ -191,9 +225,14 @@ def create_field(
     "/fields/{field_id}/",
     response_model=FormFieldOut,
     summary="Update form field",
-    description="Update a field by id and optionally replace its direct child fields.",
+    description=(
+        "Update a field by id and optionally replace its direct child fields. "
+        "Only admin users can access this endpoint."
+    ),
     responses={
         200: {"description": "Form field updated."},
+        401: {"description": "Authorization bearer token is required."},
+        403: {"description": "Admin access required."},
         404: {"description": "Form field was not found."},
         409: {"description": "Data integrity error."},
         422: {"description": "Parent assignment was invalid."},
@@ -213,9 +252,11 @@ def update_field(
     "/fields/{field_id}/",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete form field",
-    description="Delete a field and its nested child fields.",
+    description="Delete a field and its nested child fields. Only admin users can access this endpoint.",
     responses={
         204: {"description": "Form field deleted."},
+        401: {"description": "Authorization bearer token is required."},
+        403: {"description": "Admin access required."},
         404: {"description": "Form field was not found."},
     },
 )

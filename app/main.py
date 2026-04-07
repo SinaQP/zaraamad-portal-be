@@ -35,7 +35,7 @@ OPENAPI_TAGS = [
     },
     {
         "name": "forms",
-        "description": "Form schema read endpoints with municipality-aware resolution.",
+        "description": "Admin or bridge-authenticated form schema read endpoints with municipality-aware resolution.",
     },
     {
         "name": "form-admin",

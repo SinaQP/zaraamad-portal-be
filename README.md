@@ -331,7 +331,12 @@ Forms:
 
 ### Access
 
-The form endpoints currently do not enforce a dedicated form authentication layer.
+Form schema read endpoints require either:
+
+- `Authorization: Bearer <admin-token>`
+- `X-Bridge-Key: <shared-bridge-key>`
+
+Form management endpoints under `/api/admin` require an admin bearer token and do not accept bridge-only access.
 
 ### Resolution
 
@@ -547,4 +552,10 @@ Export query results from multiple SQL Server instances into Excel:
 
 ```bash
 python -m app.commands.export_db_results --input ./servers.xlsx --query-file ./query.sql --output ./db_results.xlsx
+```
+
+Run the SQL Server reference-data sync across multiple source/target rows from a CSV/XLSX file:
+
+```bash
+python -m app.commands.sync_sqlserver_reference_data --input ./connections.csv --output ./sync_report.xlsx --source-database online_db --target-database default --sync-cities --sync-income-codes
 ```
