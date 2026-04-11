@@ -9,6 +9,7 @@ DEFAULT_SQL_SERVER_PORT = 1433
 READ_ONLY_SOURCE_QUERY_TEMPLATE = "SELECT {columns} FROM {table_name}"
 SYNC_STAGE_TABLE_NAME = "#sync_stage"
 SYNC_ACTIONS_TABLE_NAME = "#sync_actions"
+SYSTEM_DATABASES = {"master", "model", "msdb", "tempdb"}
 TEXT_TYPE_NAMES = {
     "char",
     "nchar",
@@ -89,6 +90,12 @@ class SqlServerSyncTableOverride:
     primary_key_columns: tuple[str, ...] | None = None
 
 
+@dataclass(frozen=True)
+class SqlServerRowFailure:
+    source_row: int | None
+    error_message: str
+
+
 class SqlServerReferenceSyncError(Exception):
     pass
 
@@ -99,6 +106,49 @@ class SqlServerConnectionError(SqlServerReferenceSyncError):
 
 class SqlServerMetadataError(SqlServerReferenceSyncError):
     pass
+
+
+class SqlServerRowDiagnosticError(SqlServerReferenceSyncError):
+    def __init__(
+        self,
+        *,
+        table: SqlServerTableReference,
+        row_failures: Sequence[SqlServerRowFailure],
+        original_error: Exception,
+    ) -> None:
+        self.table = table
+        self.row_failures = tuple(row_failures)
+        self.original_error = original_error
+        super().__init__(self._build_message())
+
+    @property
+    def source_rows_csv(self) -> str | None:
+        row_numbers = [
+            str(row_failure.source_row)
+            for row_failure in self.row_failures
+            if row_failure.source_row is not None
+        ]
+        if not row_numbers:
+            return None
+        return ", ".join(row_numbers)
+
+    def _build_message(self) -> str:
+        if not self.row_failures:
+            return str(self.original_error)
+        row_messages = "; ".join(
+            self._format_row_failure(row_failure) for row_failure in self.row_failures[:10]
+        )
+        if len(self.row_failures) > 10:
+            row_messages += f"; ... و {len(self.row_failures) - 10} ردیف دیگر"
+        return (
+            f"ردیف‌های ناسازگار در فایل برای جدول {self.table.schema_name}.{self.table.table_name}: "
+            f"{row_messages}"
+        )
+
+    def _format_row_failure(self, row_failure: SqlServerRowFailure) -> str:
+        if row_failure.source_row is None:
+            return row_failure.error_message
+        return f"ردیف {row_failure.source_row}: {row_failure.error_message}"
 
 
 class SqlServerEngineFactory:
@@ -360,6 +410,17 @@ class SqlServerSyncPlanBuilder:
 
 
 class SqlServerSyncSqlBuilder:
+    def build_sync_actions_table_query(self) -> str:
+        return f"CREATE TABLE {SYNC_ACTIONS_TABLE_NAME} ([action] nvarchar(10) NOT NULL);"
+
+    def build_sync_action_summary_query(self) -> str:
+        return (
+            "SELECT "
+            "SUM(CASE WHEN [action] = 'INSERT' THEN 1 ELSE 0 END) AS inserted_count, "
+            "SUM(CASE WHEN [action] = 'UPDATE' THEN 1 ELSE 0 END) AS updated_count "
+            f"FROM {SYNC_ACTIONS_TABLE_NAME};"
+        )
+
     def build_source_select_query(self, plan: SqlServerTableSyncPlan) -> str:
         column_list = self._format_column_list(plan.sync_columns)
         source_table_name = self._format_table_name(
@@ -380,9 +441,8 @@ class SqlServerSyncSqlBuilder:
             schema_name=plan.table.schema_name,
             table_name=plan.table.table_name,
         )
-        column_list = self._format_column_list(plan.sync_columns)
         return (
-            f"SELECT TOP 0 {column_list} INTO {SYNC_STAGE_TABLE_NAME} "
+            f"SELECT TOP 0 {self._format_stage_select_columns(plan.sync_columns)} INTO {SYNC_STAGE_TABLE_NAME} "
             f"FROM {target_table_name};"
         )
 
@@ -445,7 +505,6 @@ class SqlServerSyncSqlBuilder:
             table_name=plan.table.table_name,
         )
         merge_lines = [
-            f"CREATE TABLE {SYNC_ACTIONS_TABLE_NAME} ([action] nvarchar(10) NOT NULL);",
             f"MERGE {target_table_name} AS target",
             f"USING {source_dataset} AS {source_alias}",
             f"ON {self._build_primary_key_join(plan.primary_key_columns)}",
@@ -462,12 +521,6 @@ class SqlServerSyncSqlBuilder:
             f"({self._format_source_column_list(plan.sync_columns, source_alias=source_alias)})"
         )
         merge_lines.append(f"OUTPUT $action INTO {SYNC_ACTIONS_TABLE_NAME};")
-        merge_lines.append(
-            "SELECT "
-            "SUM(CASE WHEN [action] = 'INSERT' THEN 1 ELSE 0 END) AS inserted_count, "
-            "SUM(CASE WHEN [action] = 'UPDATE' THEN 1 ELSE 0 END) AS updated_count "
-            f"FROM {SYNC_ACTIONS_TABLE_NAME};"
-        )
         return "\n".join(merge_lines)
 
     def _build_primary_key_join(
@@ -537,6 +590,19 @@ class SqlServerSyncSqlBuilder:
     def _format_column_list(self, columns: Sequence[SqlServerColumnMetadata]) -> str:
         return ", ".join(self._quote_identifier(column.name) for column in columns)
 
+    def _format_stage_select_columns(
+        self,
+        columns: Sequence[SqlServerColumnMetadata],
+    ) -> str:
+        formatted_columns: list[str] = []
+        for column in columns:
+            quoted_name = self._quote_identifier(column.name)
+            if column.is_identity:
+                formatted_columns.append(f"({quoted_name} + 0) AS {quoted_name}")
+                continue
+            formatted_columns.append(quoted_name)
+        return ", ".join(formatted_columns)
+
     def _format_source_column_list(
         self,
         columns: Sequence[SqlServerColumnMetadata],
@@ -597,6 +663,50 @@ class SqlServerModelSyncExecutor:
         self._check_connection(settings=source_settings)
         self._check_connection(settings=target_settings)
 
+    def check_target_connection(self, *, target_settings: SqlServerConnectionSettings) -> None:
+        self._check_connection(settings=target_settings)
+
+    def discover_target_databases(
+        self,
+        *,
+        target_settings: SqlServerConnectionSettings,
+    ) -> list[str]:
+        engine = self._engine_factory.create_engine(target_settings)
+        discovery_query = text(
+            """
+            SELECT name
+            FROM sys.databases
+            WHERE state = 0
+              AND name NOT IN ('master', 'model', 'msdb', 'tempdb')
+            ORDER BY name
+            """
+        )
+        try:
+            with engine.connect() as connection:
+                return [str(name) for name in connection.execute(discovery_query).scalars().all()]
+        finally:
+            engine.dispose()
+
+    def fetch_existing_column_values(
+        self,
+        *,
+        target_settings: SqlServerConnectionSettings,
+        table: SqlServerTableReference,
+        column_name: str,
+    ) -> set[Any]:
+        engine = self._engine_factory.create_engine(target_settings)
+        query = text(
+            "SELECT DISTINCT "
+            f"{self._quote_identifier(column_name)} AS value "
+            f"FROM {self._format_table_name(table=table)} "
+            f"WHERE {self._quote_identifier(column_name)} IS NOT NULL"
+        )
+        try:
+            with engine.connect() as connection:
+                return set(connection.execute(query).scalars().all())
+        finally:
+            engine.dispose()
+
     def execute(
         self,
         *,
@@ -632,6 +742,67 @@ class SqlServerModelSyncExecutor:
                 )
         finally:
             source_engine.dispose()
+            target_engine.dispose()
+
+    def execute_from_rows(
+        self,
+        *,
+        target_settings: SqlServerConnectionSettings,
+        table: SqlServerTableReference,
+        row_payloads: Sequence[dict[str, Any]],
+        override: SqlServerSyncTableOverride | None = None,
+        diagnose_on_error: bool = True,
+    ) -> SqlServerModelSyncStats:
+        target_engine = self._engine_factory.create_engine(target_settings)
+        try:
+            try:
+                with target_engine.begin() as target_connection:
+                    target_columns = self._metadata_loader.load(target_connection, table)
+                    source_columns = self._build_source_columns_from_rows(
+                        target_columns=target_columns,
+                        row_payloads=row_payloads,
+                    )
+                    plan = self._sync_plan_builder.build(
+                        table=table,
+                        source_columns=source_columns,
+                        target_columns=target_columns,
+                        override=override,
+                    )
+                    target_connection.exec_driver_sql(self._sql_builder.build_stage_table_query(plan))
+                    if row_payloads:
+                        stage_insert_query = self._sql_builder.build_stage_insert_query(plan)
+                        target_connection.exec_driver_sql(
+                            stage_insert_query,
+                            [self._build_stage_row(plan=plan, row_payload=row_payload) for row_payload in row_payloads],
+                        )
+                    stats = self._run_merge_query(
+                        target_connection=target_connection,
+                        plan=plan,
+                        merge_query=self._sql_builder.build_stage_merge_query(plan),
+                    )
+                    return SqlServerModelSyncStats(
+                        mode="file",
+                        inserted_count=stats.inserted_count,
+                        updated_count=stats.updated_count,
+                        source_row_count=len(row_payloads),
+                    )
+            except Exception as exc:
+                if not diagnose_on_error:
+                    raise
+                row_failures = self._diagnose_row_failures(
+                    target_engine=target_engine,
+                    table=table,
+                    row_payloads=row_payloads,
+                    override=override,
+                )
+                if row_failures:
+                    raise SqlServerRowDiagnosticError(
+                        table=table,
+                        row_failures=row_failures,
+                        original_error=exc,
+                    ) from exc
+                raise
+        finally:
             target_engine.dispose()
 
     def _check_connection(self, *, settings: SqlServerConnectionSettings) -> None:
@@ -683,6 +854,116 @@ class SqlServerModelSyncExecutor:
             source_row_count=source_row_count,
         )
 
+    def _build_source_columns_from_rows(
+        self,
+        *,
+        target_columns: Sequence[SqlServerColumnMetadata],
+        row_payloads: Sequence[dict[str, Any]],
+    ) -> tuple[SqlServerColumnMetadata, ...]:
+        if row_payloads:
+            available_column_names = set(row_payloads[0].keys())
+        else:
+            available_column_names = {column.name for column in target_columns}
+        source_columns = tuple(
+            SqlServerColumnMetadata(
+                name=column.name,
+                type_name=column.type_name,
+                is_nullable=column.is_nullable,
+                is_primary_key=column.is_primary_key,
+                primary_key_ordinal=column.primary_key_ordinal,
+                is_identity=column.is_identity,
+            )
+            for column in target_columns
+            if column.name in available_column_names
+        )
+        if not source_columns:
+            raise SqlServerMetadataError("Input data has no matching columns for the target table.")
+        return source_columns
+
+    def _build_stage_row(
+        self,
+        *,
+        plan: SqlServerTableSyncPlan,
+        row_payload: dict[str, Any],
+    ) -> tuple[Any, ...]:
+        return tuple(row_payload.get(column.name) for column in plan.sync_columns)
+
+    def _diagnose_row_failures(
+        self,
+        *,
+        target_engine,
+        table: SqlServerTableReference,
+        row_payloads: Sequence[dict[str, Any]],
+        override: SqlServerSyncTableOverride | None,
+    ) -> list[SqlServerRowFailure]:
+        row_failures: list[SqlServerRowFailure] = []
+        for row_payload in row_payloads:
+            source_row = self._read_source_row_number(row_payload=row_payload)
+            try:
+                with target_engine.connect() as target_connection:
+                    transaction = target_connection.begin()
+                    try:
+                        self._execute_single_row_diagnostic(
+                            target_connection=target_connection,
+                            table=table,
+                            row_payload=row_payload,
+                            override=override,
+                        )
+                    finally:
+                        if transaction.is_active:
+                            transaction.rollback()
+            except Exception as exc:
+                row_failures.append(
+                    SqlServerRowFailure(
+                        source_row=source_row,
+                        error_message=self._simplify_error_message(exc),
+                    )
+                )
+        return row_failures
+
+    def _execute_single_row_diagnostic(
+        self,
+        *,
+        target_connection,
+        table: SqlServerTableReference,
+        row_payload: dict[str, Any],
+        override: SqlServerSyncTableOverride | None,
+    ) -> None:
+        target_columns = self._metadata_loader.load(target_connection, table)
+        source_columns = self._build_source_columns_from_rows(
+            target_columns=target_columns,
+            row_payloads=[row_payload],
+        )
+        plan = self._sync_plan_builder.build(
+            table=table,
+            source_columns=source_columns,
+            target_columns=target_columns,
+            override=override,
+        )
+        target_connection.exec_driver_sql(self._sql_builder.build_stage_table_query(plan))
+        target_connection.exec_driver_sql(
+            self._sql_builder.build_stage_insert_query(plan),
+            [self._build_stage_row(plan=plan, row_payload=row_payload)],
+        )
+        self._run_merge_query(
+            target_connection=target_connection,
+            plan=plan,
+            merge_query=self._sql_builder.build_stage_merge_query(plan),
+        )
+
+    def _read_source_row_number(self, *, row_payload: dict[str, Any]) -> int | None:
+        source_row = row_payload.get("__source_row__")
+        if isinstance(source_row, int):
+            return source_row
+        return None
+
+    def _simplify_error_message(self, exc: Exception) -> str:
+        raw_message = str(exc).strip()
+        if raw_message.startswith("("):
+            return raw_message
+        first_line = raw_message.splitlines()[0].strip()
+        return first_line or raw_message
+
     def _execute_linked_server_merge(
         self,
         *,
@@ -715,6 +996,7 @@ class SqlServerModelSyncExecutor:
         merge_query: str,
     ) -> SqlServerModelSyncStats:
         identity_primary_key = plan.identity_primary_key
+        target_connection.exec_driver_sql(self._sql_builder.build_sync_actions_table_query())
         if identity_primary_key is not None:
             target_connection.exec_driver_sql(
                 self._sql_builder.build_identity_insert_toggle_query(
@@ -723,7 +1005,10 @@ class SqlServerModelSyncExecutor:
                 )
             )
         try:
-            row = target_connection.exec_driver_sql(merge_query).mappings().one()
+            target_connection.exec_driver_sql(merge_query)
+            row = target_connection.exec_driver_sql(
+                self._sql_builder.build_sync_action_summary_query()
+            ).mappings().one()
         finally:
             if identity_primary_key is not None:
                 target_connection.exec_driver_sql(
@@ -740,3 +1025,14 @@ class SqlServerModelSyncExecutor:
             updated_count=updated_count,
             source_row_count=None,
         )
+
+    def _format_table_name(self, *, table: SqlServerTableReference) -> str:
+        return ".".join(
+            [
+                self._quote_identifier(table.schema_name),
+                self._quote_identifier(table.table_name),
+            ]
+        )
+
+    def _quote_identifier(self, name: str) -> str:
+        return f"[{name.replace(']', ']]')}]"

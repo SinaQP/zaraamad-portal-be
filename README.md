@@ -554,8 +554,8 @@ Export query results from multiple SQL Server instances into Excel:
 python -m app.commands.export_db_results --input ./servers.xlsx --query-file ./query.sql --output ./db_results.xlsx
 ```
 
-Run the SQL Server reference-data sync across multiple source/target rows from a CSV/XLSX file:
+Import SQL Server reference-data files into multiple target databases from a CSV/XLSX target list:
 
 ```bash
-python -m app.commands.sync_sqlserver_reference_data --input ./connections.csv --output ./sync_report.xlsx --source-database online_db --target-database default --sync-cities --sync-income-codes
+python -m app.commands.sync_sqlserver_reference_data --targets-input ./docs/db_export/servers_from_pdf.csv --output ./sync_report.xlsx --target-database default --sync-transport-year-amounts --transport-year-amounts-file ./transport_year_amounts.xlsx
 ```

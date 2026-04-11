@@ -54,6 +54,16 @@ def test_stage_merge_query_is_insert_update_only() -> None:
     assert "WHEN NOT MATCHED BY SOURCE THEN DELETE" not in query
     assert "COLLATE DATABASE_DEFAULT" in query
     assert "CAST(target.[IsActive] AS INT)" in query
+    assert "SELECT SUM(CASE WHEN [action]" not in query
+
+
+def test_stage_table_query_removes_identity_from_temp_table() -> None:
+    builder = SqlServerSyncSqlBuilder()
+
+    query = builder.build_stage_table_query(_build_plan())
+
+    assert "([Id] + 0) AS [Id]" in query
+    assert "INTO #sync_stage" in query
 
 
 def test_linked_server_merge_query_uses_four_part_name() -> None:
@@ -66,3 +76,12 @@ def test_linked_server_merge_query_uses_four_part_name() -> None:
     )
 
     assert "[REMOTE_SYNC].[online_db].[dbo].[Menus]" in query
+
+
+def test_sync_action_summary_query_is_separate() -> None:
+    builder = SqlServerSyncSqlBuilder()
+
+    query = builder.build_sync_action_summary_query()
+
+    assert "SUM(CASE WHEN [action] = 'INSERT'" in query
+    assert "FROM #sync_actions" in query

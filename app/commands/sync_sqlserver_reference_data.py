@@ -1,4 +1,4 @@
-"""Manual SQL Server reference-data sync command for multiple source/target databases."""
+"""Manual SQL Server reference-data import command for multiple target databases."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import argparse
 import csv
 import json
 import logging
-import os
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -28,52 +28,39 @@ from app.common.services.sqlserver_reference_sync import (
 
 
 @dataclass(frozen=True)
-class SyncDatabaseTarget:
+class TargetDatabaseTarget:
     host: str
     port: int
     username: str
     password: str
-    database_name: str
-
-
-@dataclass(frozen=True)
-class SyncServerTarget:
-    source: SyncDatabaseTarget
-    target: SyncDatabaseTarget
-    linked_server_name: str | None
     source_row: int
 
 
 @dataclass(frozen=True)
-class SyncModelExecutionPlan:
+class DataSyncPlan:
     sync_flag: str
     model_name: str
     table: SqlServerTableReference
-    override: SqlServerSyncTableOverride | None
+    data_file_path: Path
+    override: SqlServerSyncTableOverride | None = None
 
 
 @dataclass(frozen=True)
-class SyncExecutionResult:
-    source_host: str
-    source_database: str
+class DataSyncResult:
     target_host: str
     target_database: str
     sync_flag: str
     model_name: str
-    schema_name: str
-    table_name: str
-    mode: str
+    data_file: str
     inserted_count: int
     updated_count: int
+    skipped_row_count: int
     source_row_count: int | None
-    linked_server_name: str | None
     status: str
 
 
 @dataclass(frozen=True)
-class SyncExecutionError:
-    source_host: str | None
-    source_database: str | None
+class DataSyncError:
     target_host: str | None
     target_database: str | None
     sync_flag: str | None
@@ -83,32 +70,43 @@ class SyncExecutionError:
 
 
 @dataclass(frozen=True)
-class SyncCommandSummary:
-    servers_processed: int
-    selected_models: int
-    model_runs_attempted: int
-    successful_model_runs: int
+class DataSyncSkippedRow:
+    target_host: str
+    target_database: str
+    sync_flag: str
+    model_name: str
+    data_file: str
+    source_row: int | None
+    row_identifier: str | None
+    reference_table: str
+    reference_column: str
+    reference_value: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class DataSyncSummary:
+    targets_processed: int
+    selected_tables: int
+    table_runs_attempted: int
+    successful_table_runs: int
+    skipped_row_count: int
     error_count: int
     output_path: Path
+
+
+@dataclass(frozen=True)
+class MissingReferenceSkipRule:
+    source_column_name: str
+    reference_table: SqlServerTableReference
+    reference_column_name: str = "id"
 
 
 class SyncDbPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    sync_actions: bool = False
-    sync_cities: bool = False
-    sync_municipality_info: bool = False
-    sync_menus: bool = False
-    sync_provinces: bool = False
-    sync_subsystems: bool = False
-    sync_transport_colors: bool = False
-    sync_transport_manufacturer_countries: bool = False
-    sync_transport_plates: bool = False
-    sync_transport_systems: bool = False
-    sync_transport_usage_types: bool = False
     sync_transport_tariffs: bool = False
     sync_transport_year_amounts: bool = False
-    sync_income_codes: bool = False
 
     @model_validator(mode="after")
     def apply_transport_dependencies(self) -> "SyncDbPayload":
@@ -117,59 +115,48 @@ class SyncDbPayload(BaseModel):
         return self
 
 
-class SyncServerInputReader:
+class TargetServerInputReader:
     HEADER_ALIASES = {
         "host": {"ip", "host", "hostname", "server", "serverip", "serverhost", "address"},
         "port": {"port", "serverport", "dbport"},
         "username": {"username", "user", "userid", "uid", "login"},
         "password": {"password", "pass", "passwd", "pwd"},
-        "source_host": {"sourceip", "sourcehost", "sourcehostname", "sourceaddress"},
-        "source_port": {"sourceport", "sourcedbport"},
-        "source_username": {"sourceusername", "sourceuser", "sourceuid", "sourcelogin"},
-        "source_password": {"sourcepassword", "sourcepass", "sourcepasswd", "sourcepwd"},
-        "source_database": {"sourcedatabase", "source_db", "sourcedb"},
-        "target_host": {"targetip", "targethost", "targethostname", "targetaddress"},
-        "target_port": {"targetport", "targetdbport"},
-        "target_username": {"targetusername", "targetuser", "targetuid", "targetlogin"},
-        "target_password": {"targetpassword", "targetpass", "targetpasswd", "targetpwd"},
-        "target_database": {"targetdatabase", "target_db", "targetdb", "database"},
-        "linked_server_name": {
-            "linkedserver",
-            "linkedservername",
-            "linked_server",
-            "linked_server_name",
-        },
     }
 
     def read(
         self,
         *,
         input_path: Path,
-        default_source_database: str,
         default_target_database: str,
-        default_linked_server_name: str | None,
-    ) -> tuple[list[SyncServerTarget], list[SyncExecutionError]]:
+    ) -> tuple[list[TargetDatabaseTarget], list[DataSyncError]]:
+        del default_target_database
         rows = self._read_rows(input_path=input_path)
-        targets: list[SyncServerTarget] = []
-        errors: list[SyncExecutionError] = []
+        targets: list[TargetDatabaseTarget] = []
+        errors: list[DataSyncError] = []
         for row_number, row in rows:
             try:
                 targets.append(
-                    self._build_target(
-                        row=row,
-                        row_number=row_number,
-                        default_source_database=default_source_database,
-                        default_target_database=default_target_database,
-                        default_linked_server_name=default_linked_server_name,
+                    TargetDatabaseTarget(
+                        host=self._require_value(row=row, key="host", field_label="host"),
+                        port=self._safe_port(row.get("port")) or DEFAULT_SQL_SERVER_PORT,
+                        username=self._require_value(
+                            row=row,
+                            key="username",
+                            field_label="username",
+                        ),
+                        password=self._require_value(
+                            row=row,
+                            key="password",
+                            field_label="password",
+                        ),
+                        source_row=row_number,
                     )
                 )
             except ValueError as exc:
                 errors.append(
-                    SyncExecutionError(
-                        source_host=self._normalize_text(row.get("source_host") or row.get("host")),
-                        source_database=self._normalize_text(row.get("source_database")) or default_source_database,
-                        target_host=self._normalize_text(row.get("target_host") or row.get("host")),
-                        target_database=self._normalize_text(row.get("target_database")) or default_target_database,
+                    DataSyncError(
+                        target_host=self._normalize_text(row.get("host")),
+                        target_database=None,
                         sync_flag=None,
                         model_name=None,
                         source_row=row_number,
@@ -179,30 +166,17 @@ class SyncServerInputReader:
         return targets, errors
 
     def _read_rows(self, *, input_path: Path) -> list[tuple[int, dict[str, Any]]]:
-        suffix = input_path.suffix.lower()
-        if suffix == ".csv":
-            return self._read_csv(input_path=input_path)
-        if suffix == ".xlsx":
-            return self._read_xlsx(input_path=input_path)
-        raise ValueError("Input file must be .xlsx or .csv.")
-
-    def _read_csv(self, *, input_path: Path) -> list[tuple[int, dict[str, Any]]]:
-        with input_path.open("r", encoding="utf-8-sig", newline="") as file_handle:
-            rows = list(csv.reader(file_handle))
-        if not rows:
-            return []
-        header_lookup = self._build_header_lookup(headers=rows[0])
-        return [
-            (row_number, self._extract_row_values(row=row, header_lookup=header_lookup))
-            for row_number, row in enumerate(rows[1:], start=2)
-        ]
-
-    def _read_xlsx(self, *, input_path: Path) -> list[tuple[int, dict[str, Any]]]:
-        workbook = load_workbook(filename=input_path, read_only=True, data_only=True)
-        try:
-            rows = list(workbook.active.iter_rows(values_only=True))
-        finally:
-            workbook.close()
+        if input_path.suffix.lower() == ".csv":
+            with input_path.open("r", encoding="utf-8-sig", newline="") as file_handle:
+                rows = list(csv.reader(file_handle))
+        elif input_path.suffix.lower() == ".xlsx":
+            workbook = load_workbook(filename=input_path, read_only=True, data_only=True)
+            try:
+                rows = list(workbook.active.iter_rows(values_only=True))
+            finally:
+                workbook.close()
+        else:
+            raise ValueError("Target input file must be .xlsx or .csv.")
         if not rows:
             return []
         header_lookup = self._build_header_lookup(headers=rows[0])
@@ -233,131 +207,17 @@ class SyncServerInputReader:
             for canonical_name, column_index in header_lookup.items()
         }
 
-    def _build_target(
-        self,
-        *,
-        row: dict[str, Any],
-        row_number: int,
-        default_source_database: str,
-        default_target_database: str,
-        default_linked_server_name: str | None,
-    ) -> SyncServerTarget:
-        source_target = SyncDatabaseTarget(
-            host=self._require_value(
-                row=row,
-                specific_key="source_host",
-                generic_key="host",
-                field_label="source host",
-            ),
-            port=self._resolve_port(row=row, specific_key="source_port", generic_key="port"),
-            username=self._require_value(
-                row=row,
-                specific_key="source_username",
-                generic_key="username",
-                field_label="source username",
-            ),
-            password=self._require_value(
-                row=row,
-                specific_key="source_password",
-                generic_key="password",
-                field_label="source password",
-            ),
-            database_name=self._resolve_database_name(
-                row=row,
-                key="source_database",
-                default_value=default_source_database,
-                field_label="source database",
-            ),
-        )
-        target_target = SyncDatabaseTarget(
-            host=self._require_value(
-                row=row,
-                specific_key="target_host",
-                generic_key="host",
-                field_label="target host",
-            ),
-            port=self._resolve_port(row=row, specific_key="target_port", generic_key="port"),
-            username=self._require_value(
-                row=row,
-                specific_key="target_username",
-                generic_key="username",
-                field_label="target username",
-            ),
-            password=self._require_value(
-                row=row,
-                specific_key="target_password",
-                generic_key="password",
-                field_label="target password",
-            ),
-            database_name=self._resolve_database_name(
-                row=row,
-                key="target_database",
-                default_value=default_target_database,
-                field_label="target database",
-            ),
-        )
-        linked_server_name = self._normalize_text(row.get("linked_server_name"))
-        return SyncServerTarget(
-            source=source_target,
-            target=target_target,
-            linked_server_name=linked_server_name or default_linked_server_name,
-            source_row=row_number,
-        )
-
-    def _require_value(
-        self,
-        *,
-        row: dict[str, Any],
-        specific_key: str,
-        generic_key: str,
-        field_label: str,
-    ) -> str:
-        normalized_value = self._normalize_text(row.get(specific_key))
-        if normalized_value is not None:
-            return normalized_value
-        normalized_generic_value = self._normalize_text(row.get(generic_key))
-        if normalized_generic_value is not None:
-            return normalized_generic_value
-        raise ValueError(f"Missing {field_label} value.")
-
-    def _resolve_database_name(
-        self,
-        *,
-        row: dict[str, Any],
-        key: str,
-        default_value: str,
-        field_label: str,
-    ) -> str:
+    def _require_value(self, *, row: dict[str, Any], key: str, field_label: str) -> str:
         normalized_value = self._normalize_text(row.get(key))
-        if normalized_value is not None:
-            return normalized_value
-        normalized_default_value = default_value.strip()
-        if normalized_default_value:
-            return normalized_default_value
-        raise ValueError(f"Missing {field_label} value.")
-
-    def _resolve_port(
-        self,
-        *,
-        row: dict[str, Any],
-        specific_key: str,
-        generic_key: str,
-    ) -> int:
-        specific_port = self._safe_port(row.get(specific_key))
-        if specific_port is not None:
-            return specific_port
-        generic_port = self._safe_port(row.get(generic_key))
-        if generic_port is not None:
-            return generic_port
-        return DEFAULT_SQL_SERVER_PORT
+        if normalized_value is None:
+            raise ValueError(f"Missing {field_label} value.")
+        return normalized_value
 
     def _normalize_header_name(self, value: object) -> str | None:
         text_value = self._normalize_text(value)
         if text_value is None:
             return None
-        return "".join(
-            character for character in text_value.lower() if character.isalnum() or character == "_"
-        )
+        return "".join(character for character in text_value.lower() if character.isalnum())
 
     def _normalize_text(self, value: object | None) -> str | None:
         if value is None:
@@ -376,66 +236,112 @@ class SyncServerInputReader:
             return None
 
 
-class SyncModelCatalog:
-    _MODEL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-        ("sync_menus", ("Menus",)),
-        ("sync_provinces", ("Provinces",)),
-        ("sync_subsystems", ("SubSystems",)),
-        ("sync_actions", ("Action",)),
-        ("sync_cities", ("Cities",)),
-        ("sync_municipality_info", ("MunicipalityInfo",)),
-        ("sync_transport_colors", ("TransportColors",)),
-        ("sync_transport_manufacturer_countries", ("TransportManufacturerCountries",)),
-        ("sync_transport_plates", ("TransportPlates",)),
-        ("sync_transport_systems", ("TransportSystems",)),
-        ("sync_transport_usage_types", ("TransportUsageTypes",)),
+class ReferenceDataFileReader:
+    def read(self, input_path: Path) -> list[dict[str, Any]]:
+        rows = self._read_raw_rows(input_path=input_path)
+        if not rows:
+            return []
+        headers = [self._normalize_header_name(value) for value in rows[0]]
+        column_names = [header for header in headers if header]
+        normalized_rows: list[dict[str, Any]] = []
+        for row_number, row in enumerate(rows[1:], start=2):
+            payload: dict[str, Any] = {}
+            for index, column_name in enumerate(headers):
+                if not column_name:
+                    continue
+                payload[column_name] = row[index] if index < len(row) else None
+            payload["__source_row__"] = row_number
+            normalized_rows.append(payload)
+        if not column_names:
+            raise ValueError(f"Data file '{input_path}' does not contain usable headers.")
+        return normalized_rows
+
+    def _read_raw_rows(self, *, input_path: Path) -> list[Sequence[object]]:
+        if input_path.suffix.lower() == ".csv":
+            with input_path.open("r", encoding="utf-8-sig", newline="") as file_handle:
+                return list(csv.reader(file_handle))
+        if input_path.suffix.lower() == ".xlsx":
+            workbook = load_workbook(filename=input_path, read_only=True, data_only=True)
+            try:
+                return list(workbook.active.iter_rows(values_only=True))
+            finally:
+                workbook.close()
+        raise ValueError("Data file must be .xlsx or .csv.")
+
+    def _normalize_header_name(self, value: object | None) -> str | None:
+        if value is None:
+            return None
+        text_value = str(value).strip()
+        if not text_value:
+            return None
+        return text_value
+
+
+class SyncPlanBuilder:
+    _TABLE_ARGS = {
+        "TransportTariffs": "transport_tariffs_file",
+        "TransportTariffLocals": "transport_tariff_locals_file",
+        "TransportYearAmounts": "transport_year_amounts_file",
+        "TransportYearAmountLocals": "transport_year_amount_locals_file",
+    }
+    _TABLE_SCHEMAS = {
+        "TransportTariffs": "Trp",
+        "TransportTariffLocals": "Trp",
+        "TransportYearAmounts": "Trp",
+        "TransportYearAmountLocals": "Trp",
+    }
+    _TABLE_OVERRIDES = {
+        "TransportYearAmounts": SqlServerSyncTableOverride(
+            schema_name="Trp",
+            column_names=("Amount", "Year", "IsDeleted", "TransportTariffId"),
+            primary_key_columns=("Year", "TransportTariffId"),
+        ),
+    }
+    _GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("sync_transport_tariffs", ("TransportTariffs", "TransportTariffLocals")),
         ("sync_transport_year_amounts", ("TransportYearAmounts", "TransportYearAmountLocals")),
-        ("sync_income_codes", ("IncomeCodes",)),
     )
 
-    def build(self, *, payload: SyncDbPayload) -> list[SyncModelExecutionPlan]:
-        plans: list[SyncModelExecutionPlan] = []
-        payload_values = payload.model_dump()
-        for sync_flag, model_names in self._MODEL_GROUPS:
-            if not payload_values[sync_flag]:
+    def build(self, *, payload: SyncDbPayload, args: argparse.Namespace) -> list[DataSyncPlan]:
+        plans: list[DataSyncPlan] = []
+        payload_data = payload.model_dump()
+        for sync_flag, table_names in self._GROUPS:
+            if not payload_data[sync_flag]:
                 continue
-            for model_name in model_names:
+            for table_name in table_names:
+                file_path = getattr(args, self._TABLE_ARGS[table_name])
+                if not file_path:
+                    continue
                 plans.append(
-                    SyncModelExecutionPlan(
+                    DataSyncPlan(
                         sync_flag=sync_flag,
-                        model_name=model_name,
+                        model_name=table_name,
                         table=SqlServerTableReference(
-                            model_name=model_name,
-                            schema_name="dbo",
-                            table_name=model_name,
+                            model_name=table_name,
+                            schema_name=self._TABLE_SCHEMAS[table_name],
+                            table_name=table_name,
                         ),
-                        override=None,
+                        data_file_path=Path(file_path).resolve(),
+                        override=self._TABLE_OVERRIDES.get(table_name),
                     )
                 )
         return plans
 
 
 class SyncReportWriter:
-    _RESULT_COLUMNS = [
-        "source_host",
-        "source_database",
+    RESULT_COLUMNS = [
         "target_host",
         "target_database",
         "sync_flag",
         "model_name",
-        "schema_name",
-        "table_name",
-        "mode",
+        "data_file",
         "inserted_count",
         "updated_count",
+        "skipped_row_count",
         "source_row_count",
-        "linked_server_name",
         "status",
     ]
-    _ERROR_COLUMNS = [
-        "source_host",
-        "source_database",
+    ERROR_COLUMNS = [
         "target_host",
         "target_database",
         "sync_flag",
@@ -443,162 +349,155 @@ class SyncReportWriter:
         "source_row",
         "error_message",
     ]
+    SKIPPED_COLUMNS = [
+        "target_host",
+        "target_database",
+        "sync_flag",
+        "model_name",
+        "data_file",
+        "source_row",
+        "row_identifier",
+        "reference_table",
+        "reference_column",
+        "reference_value",
+        "reason",
+    ]
 
     def save(
         self,
         *,
         output_path: Path,
-        summary: SyncCommandSummary,
-        results: Sequence[SyncExecutionResult],
-        errors: Sequence[SyncExecutionError],
+        summary: DataSyncSummary,
+        results: Sequence[DataSyncResult],
+        errors: Sequence[DataSyncError],
+        skipped_rows: Sequence[DataSyncSkippedRow],
     ) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         if output_path.suffix.lower() == ".json":
-            self._save_json(
-                output_path=output_path,
-                summary=summary,
-                results=results,
-                errors=errors,
+            output_path.write_text(
+                json.dumps(
+                    {
+                        "summary": summary.__dict__ | {"output_path": str(summary.output_path)},
+                        "results": [result.__dict__ for result in results],
+                        "errors": [error.__dict__ for error in errors],
+                        "skipped_rows": [skipped_row.__dict__ for skipped_row in skipped_rows],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    default=str,
+                ),
+                encoding="utf-8",
             )
             return
-        self._save_xlsx(
-            output_path=output_path,
-            summary=summary,
-            results=results,
-            errors=errors,
-        )
 
-    def _save_json(
-        self,
-        *,
-        output_path: Path,
-        summary: SyncCommandSummary,
-        results: Sequence[SyncExecutionResult],
-        errors: Sequence[SyncExecutionError],
-    ) -> None:
-        payload = {
-            "summary": {
-                "servers_processed": summary.servers_processed,
-                "selected_models": summary.selected_models,
-                "model_runs_attempted": summary.model_runs_attempted,
-                "successful_model_runs": summary.successful_model_runs,
-                "error_count": summary.error_count,
-                "output_path": str(summary.output_path),
-            },
-            "results": [result.__dict__ for result in results],
-            "errors": [error.__dict__ for error in errors],
-        }
-        output_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-    def _save_xlsx(
-        self,
-        *,
-        output_path: Path,
-        summary: SyncCommandSummary,
-        results: Sequence[SyncExecutionResult],
-        errors: Sequence[SyncExecutionError],
-    ) -> None:
         workbook = Workbook(write_only=True)
         summary_sheet = workbook.create_sheet(title="summary")
         results_sheet = workbook.create_sheet(title="results")
         errors_sheet = workbook.create_sheet(title="errors")
-
+        skipped_sheet = workbook.create_sheet(title="skipped_rows")
         summary_sheet.append(["metric", "value"])
-        summary_sheet.append(["servers_processed", summary.servers_processed])
-        summary_sheet.append(["selected_models", summary.selected_models])
-        summary_sheet.append(["model_runs_attempted", summary.model_runs_attempted])
-        summary_sheet.append(["successful_model_runs", summary.successful_model_runs])
-        summary_sheet.append(["error_count", summary.error_count])
-        summary_sheet.append(["output_path", str(summary.output_path)])
-
-        results_sheet.append(self._RESULT_COLUMNS)
+        for key, value in summary.__dict__.items():
+            summary_sheet.append([key, str(value)])
+        results_sheet.append(self.RESULT_COLUMNS)
         for result in results:
-            results_sheet.append([getattr(result, column_name) for column_name in self._RESULT_COLUMNS])
-
-        errors_sheet.append(self._ERROR_COLUMNS)
+            results_sheet.append([getattr(result, column_name) for column_name in self.RESULT_COLUMNS])
+        errors_sheet.append(self.ERROR_COLUMNS)
         for error in errors:
-            errors_sheet.append([getattr(error, column_name) for column_name in self._ERROR_COLUMNS])
-
+            errors_sheet.append([getattr(error, column_name) for column_name in self.ERROR_COLUMNS])
+        skipped_sheet.append(self.SKIPPED_COLUMNS)
+        for skipped_row in skipped_rows:
+            skipped_sheet.append(
+                [getattr(skipped_row, column_name) for column_name in self.SKIPPED_COLUMNS]
+            )
         workbook.save(output_path)
 
 
-class SyncDbMultiServerCommand:
+class SyncSqlServerReferenceDataCommand:
+    _MISSING_REFERENCE_SKIP_RULES = {
+        "TransportYearAmounts": MissingReferenceSkipRule(
+            source_column_name="TransportTariffId",
+            reference_table=SqlServerTableReference(
+                model_name="TransportTariffs",
+                schema_name="Trp",
+                table_name="TransportTariffs",
+            ),
+        ),
+        "TransportYearAmountLocals": MissingReferenceSkipRule(
+            source_column_name="TransportTariffLocalId",
+            reference_table=SqlServerTableReference(
+                model_name="TransportTariffLocals",
+                schema_name="Trp",
+                table_name="TransportTariffLocals",
+            ),
+        ),
+    }
+
     def __init__(
         self,
         *,
-        input_reader: SyncServerInputReader,
-        model_catalog: SyncModelCatalog,
+        target_reader: TargetServerInputReader,
+        data_reader: ReferenceDataFileReader,
+        plan_builder: SyncPlanBuilder,
         executor: SqlServerModelSyncExecutor,
         report_writer: SyncReportWriter,
         logger: logging.Logger,
     ) -> None:
-        self._input_reader = input_reader
-        self._model_catalog = model_catalog
+        self._target_reader = target_reader
+        self._data_reader = data_reader
+        self._plan_builder = plan_builder
         self._executor = executor
         self._report_writer = report_writer
         self._logger = logger
+        self._last_errors: list[DataSyncError] = []
+        self._last_skipped_rows: list[DataSyncSkippedRow] = []
 
     def run(
         self,
         *,
-        input_path: Path,
+        targets_input_path: Path,
         output_path: Path,
         payload: SyncDbPayload,
-        source_database: str,
-        target_database: str,
-        linked_server_name: str | None,
-    ) -> SyncCommandSummary:
-        targets, input_errors = self._input_reader.read(
-            input_path=input_path,
-            default_source_database=source_database,
-            default_target_database=target_database,
-            default_linked_server_name=linked_server_name,
+        args: argparse.Namespace,
+    ) -> DataSyncSummary:
+        targets, errors = self._target_reader.read(
+            input_path=targets_input_path,
+            default_target_database="",
         )
-        execution_plans = self._model_catalog.build(payload=payload)
-
-        results: list[SyncExecutionResult] = []
-        errors = list(input_errors)
-        successful_model_runs = 0
-        model_runs_attempted = 0
+        plans = self._plan_builder.build(payload=payload, args=args)
+        data_by_file = {
+            plan.data_file_path: self._data_reader.read(plan.data_file_path)
+            for plan in plans
+        }
+        results: list[DataSyncResult] = []
+        skipped_rows: list[DataSyncSkippedRow] = []
+        successful_table_runs = 0
+        table_runs_attempted = 0
 
         for target in targets:
-            source_settings = SqlServerConnectionSettings(
-                host=target.source.host,
-                port=target.source.port,
-                username=target.source.username,
-                password=target.source.password,
-                database_name=target.source.database_name,
-            )
-            target_settings = SqlServerConnectionSettings(
-                host=target.target.host,
-                port=target.target.port,
-                username=target.target.username,
-                password=target.target.password,
-                database_name=target.target.database_name,
+            discovery_settings = SqlServerConnectionSettings(
+                host=target.host,
+                port=target.port,
+                username=target.username,
+                password=target.password,
+                database_name="master",
             )
             try:
-                self._executor.check_connections(
-                    source_settings=source_settings,
-                    target_settings=target_settings,
+                self._executor.check_target_connection(target_settings=discovery_settings)
+                database_names = self._executor.discover_target_databases(
+                    target_settings=discovery_settings
                 )
             except Exception as exc:
                 self._logger.error(
-                    "server_connection_check_failed source_host=%s source_database=%s target_host=%s target_database=%s error=%s",
-                    target.source.host,
-                    target.source.database_name,
-                    target.target.host,
-                    target.target.database_name,
+                    "target_connection_failed host=%s port=%s source_row=%s error=%s",
+                    target.host,
+                    target.port,
+                    target.source_row,
                     exc,
                 )
                 errors.append(
-                    SyncExecutionError(
-                        source_host=target.source.host,
-                        source_database=target.source.database_name,
-                        target_host=target.target.host,
-                        target_database=target.target.database_name,
+                    DataSyncError(
+                        target_host=target.host,
+                        target_database=None,
                         sync_flag=None,
                         model_name=None,
                         source_row=target.source_row,
@@ -607,78 +506,73 @@ class SyncDbMultiServerCommand:
                 )
                 continue
 
-            for execution_plan in execution_plans:
-                model_runs_attempted += 1
-                resolved_linked_server_name = self._resolve_linked_server_name(
-                    source_database_name=target.source.database_name,
-                    explicit_linked_server_name=target.linked_server_name,
+            for database_name in database_names:
+                target_settings = SqlServerConnectionSettings(
+                    host=target.host,
+                    port=target.port,
+                    username=target.username,
+                    password=target.password,
+                    database_name=database_name,
                 )
-                try:
-                    stats = self._executor.execute(
-                        source_settings=source_settings,
-                        target_settings=target_settings,
-                        table=execution_plan.table,
-                        linked_server_name=resolved_linked_server_name,
-                        override=execution_plan.override,
-                    )
-                    successful_model_runs += 1
-                    self._logger.info(
-                        "sync_completed source_host=%s source_database=%s target_host=%s target_database=%s model_name=%s mode=%s inserted=%s updated=%s",
-                        target.source.host,
-                        target.source.database_name,
-                        target.target.host,
-                        target.target.database_name,
-                        execution_plan.model_name,
-                        stats.mode,
-                        stats.inserted_count,
-                        stats.updated_count,
-                    )
-                    results.append(
-                        SyncExecutionResult(
-                            source_host=target.source.host,
-                            source_database=target.source.database_name,
-                            target_host=target.target.host,
-                            target_database=target.target.database_name,
-                            sync_flag=execution_plan.sync_flag,
-                            model_name=execution_plan.model_name,
-                            schema_name=execution_plan.table.schema_name,
-                            table_name=execution_plan.table.table_name,
-                            mode=stats.mode,
-                            inserted_count=stats.inserted_count,
-                            updated_count=stats.updated_count,
-                            source_row_count=stats.source_row_count,
-                            linked_server_name=resolved_linked_server_name,
-                            status="ok",
+                for plan in plans:
+                    table_runs_attempted += 1
+                    try:
+                        filtered_row_payloads = data_by_file[plan.data_file_path]
+                        run_skipped_rows: list[DataSyncSkippedRow] = []
+                        if plan.model_name in self._MISSING_REFERENCE_SKIP_RULES:
+                            filtered_row_payloads, run_skipped_rows = self._split_skipped_rows(
+                                target_settings=target_settings,
+                                plan=plan,
+                                row_payloads=filtered_row_payloads,
+                            )
+                            skipped_rows.extend(run_skipped_rows)
+                        stats = self._executor.execute_from_rows(
+                            target_settings=target_settings,
+                            table=plan.table,
+                            row_payloads=filtered_row_payloads,
+                            override=plan.override,
                         )
-                    )
-                except Exception as exc:
-                    self._logger.error(
-                        "sync_failed source_host=%s source_database=%s target_host=%s target_database=%s model_name=%s error=%s",
-                        target.source.host,
-                        target.source.database_name,
-                        target.target.host,
-                        target.target.database_name,
-                        execution_plan.model_name,
-                        exc,
-                    )
-                    errors.append(
-                        SyncExecutionError(
-                            source_host=target.source.host,
-                            source_database=target.source.database_name,
-                            target_host=target.target.host,
-                            target_database=target.target.database_name,
-                            sync_flag=execution_plan.sync_flag,
-                            model_name=execution_plan.model_name,
-                            source_row=target.source_row,
-                            error_message=str(exc),
+                        successful_table_runs += 1
+                        results.append(
+                            DataSyncResult(
+                                target_host=target.host,
+                                target_database=database_name,
+                                sync_flag=plan.sync_flag,
+                                model_name=plan.model_name,
+                                data_file=str(plan.data_file_path),
+                                inserted_count=stats.inserted_count,
+                                updated_count=stats.updated_count,
+                                skipped_row_count=len(run_skipped_rows),
+                                source_row_count=stats.source_row_count,
+                                status="ok",
+                            )
                         )
-                    )
+                    except Exception as exc:
+                        self._logger.error(
+                            "table_sync_failed host=%s database=%s table=%s source_row=%s error=%s",
+                            target.host,
+                            database_name,
+                            plan.model_name,
+                            target.source_row,
+                            exc,
+                        )
+                        errors.append(
+                            DataSyncError(
+                                target_host=target.host,
+                                target_database=database_name,
+                                sync_flag=plan.sync_flag,
+                                model_name=plan.model_name,
+                                source_row=target.source_row,
+                                error_message=str(exc),
+                            )
+                        )
 
-        summary = SyncCommandSummary(
-            servers_processed=len(targets),
-            selected_models=len(execution_plans),
-            model_runs_attempted=model_runs_attempted,
-            successful_model_runs=successful_model_runs,
+        summary = DataSyncSummary(
+            targets_processed=len(targets),
+            selected_tables=len(plans),
+            table_runs_attempted=table_runs_attempted,
+            successful_table_runs=successful_table_runs,
+            skipped_row_count=len(skipped_rows),
             error_count=len(errors),
             output_path=output_path,
         )
@@ -687,101 +581,142 @@ class SyncDbMultiServerCommand:
             summary=summary,
             results=results,
             errors=errors,
+            skipped_rows=skipped_rows,
         )
+        self._last_errors = list(errors)
+        self._last_skipped_rows = list(skipped_rows)
         return summary
 
-    def _resolve_linked_server_name(
+    @property
+    def last_errors(self) -> tuple[DataSyncError, ...]:
+        return tuple(self._last_errors)
+
+    @property
+    def last_skipped_rows(self) -> tuple[DataSyncSkippedRow, ...]:
+        return tuple(self._last_skipped_rows)
+
+    def _split_skipped_rows(
         self,
         *,
-        source_database_name: str,
-        explicit_linked_server_name: str | None,
-    ) -> str | None:
-        if explicit_linked_server_name:
-            return explicit_linked_server_name
-        specific_env_name = f"SYNC_DB_{self._normalize_env_name(source_database_name)}_LINKED_SERVER"
-        return os.getenv(specific_env_name) or os.getenv("SYNC_DB_LINKED_SERVER")
+        target_settings: SqlServerConnectionSettings,
+        plan: DataSyncPlan,
+        row_payloads: Sequence[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[DataSyncSkippedRow]]:
+        skip_rule = self._MISSING_REFERENCE_SKIP_RULES[plan.model_name]
+        existing_reference_values = {
+            self._normalize_lookup_value(value)
+            for value in self._executor.fetch_existing_column_values(
+                target_settings=target_settings,
+                table=skip_rule.reference_table,
+                column_name=skip_rule.reference_column_name,
+            )
+        }
+        valid_rows: list[dict[str, Any]] = []
+        skipped_rows: list[DataSyncSkippedRow] = []
+        for row_payload in row_payloads:
+            reference_value = row_payload.get(skip_rule.source_column_name)
+            normalized_reference_value = self._normalize_lookup_value(reference_value)
+            if normalized_reference_value is None or normalized_reference_value in existing_reference_values:
+                valid_rows.append(row_payload)
+                continue
+            skipped_rows.append(
+                DataSyncSkippedRow(
+                    target_host=target_settings.host,
+                    target_database=target_settings.database_name,
+                    sync_flag=plan.sync_flag,
+                    model_name=plan.model_name,
+                    data_file=str(plan.data_file_path),
+                    source_row=self._read_source_row(row_payload),
+                    row_identifier=self._build_row_identifier(
+                        plan=plan,
+                        row_payload=row_payload,
+                    ),
+                    reference_table=(
+                        f"{skip_rule.reference_table.schema_name}."
+                        f"{skip_rule.reference_table.table_name}"
+                    ),
+                    reference_column=skip_rule.source_column_name,
+                    reference_value=normalized_reference_value,
+                    reason=(
+                        f"{skip_rule.source_column_name}={normalized_reference_value} "
+                        f"در جدول {skip_rule.reference_table.schema_name}."
+                        f"{skip_rule.reference_table.table_name} پیدا نشد و این ردیف skip شد."
+                    ),
+                )
+            )
+        return valid_rows, skipped_rows
 
-    def _normalize_env_name(self, value: str) -> str:
-        return "".join(
-            character if character.isalnum() else "_"
-            for character in value.strip().upper()
-        )
+    def _read_source_row(self, row_payload: dict[str, Any]) -> int | None:
+        source_row = row_payload.get("__source_row__")
+        if isinstance(source_row, int):
+            return source_row
+        return None
+
+    def _build_row_identifier(
+        self,
+        *,
+        plan: DataSyncPlan,
+        row_payload: dict[str, Any],
+    ) -> str | None:
+        if "id" in row_payload and row_payload.get("id") is not None:
+            normalized_id = self._normalize_lookup_value(row_payload.get("id"))
+            if normalized_id is not None:
+                return f"id={normalized_id}"
+        if plan.model_name == "TransportYearAmounts":
+            year = self._normalize_lookup_value(row_payload.get("Year"))
+            tariff_id = self._normalize_lookup_value(row_payload.get("TransportTariffId"))
+            if year is not None and tariff_id is not None:
+                return f"Year={year}, TransportTariffId={tariff_id}"
+        return None
+
+    def _normalize_lookup_value(self, value: object | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, float):
+            if value.is_integer():
+                return str(int(value))
+            return format(value, "f").rstrip("0").rstrip(".")
+        text_value = str(value).strip()
+        if not text_value:
+            return None
+        try:
+            decimal_value = Decimal(text_value)
+        except InvalidOperation:
+            return text_value
+        normalized_decimal = decimal_value.normalize()
+        if normalized_decimal == normalized_decimal.to_integral():
+            return str(normalized_decimal.quantize(Decimal("1")))
+        return format(normalized_decimal, "f").rstrip("0").rstrip(".")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description=(
-            "Sync SQL Server reference tables from source databases into target databases "
-            "for multiple CSV/XLSX connection rows."
-        ),
+        description="Import reference-data files into multiple SQL Server target databases.",
     )
-    parser.add_argument(
-        "--input",
-        required=True,
-        help="Path to the input server list (.xlsx or .csv).",
-    )
-    parser.add_argument(
-        "--output",
-        required=True,
-        help="Path to the output report (.xlsx or .json).",
-    )
-    parser.add_argument(
-        "--source-database",
-        default="online_db",
-        help="Default source database name when the input row does not provide one.",
-    )
-    parser.add_argument(
-        "--target-database",
-        default="default",
-        help="Default target database name when the input row does not provide one.",
-    )
-    parser.add_argument(
-        "--linked-server-name",
-        default=None,
-        help="Optional explicit linked server name. Row value wins over CLI value.",
-    )
-    parser.add_argument(
-        "--driver",
-        default="ODBC Driver 18 for SQL Server",
-        help="ODBC driver name for SQL Server connections.",
-    )
-    parser.add_argument(
-        "--connect-timeout",
-        type=int,
-        default=15,
-        help="SQL Server connection timeout in seconds.",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=1000,
-        help="Batch size for staging-mode source reads.",
-    )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Logging level for the command.",
-    )
-    _add_sync_flag_arguments(parser)
+    parser.add_argument("--targets-input", required=True, help="Path to target servers CSV/XLSX.")
+    parser.add_argument("--output", required=True, help="Path to the output report (.xlsx or .json).")
+    parser.add_argument("--driver", default="ODBC Driver 18 for SQL Server", help="ODBC driver name.")
+    parser.add_argument("--connect-timeout", type=int, default=15, help="Connection timeout in seconds.")
+    parser.add_argument("--batch-size", type=int, default=1000, help="Batch size.")
+    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument("--sync-transport-tariffs", action="store_true")
+    parser.add_argument("--sync-transport-year-amounts", action="store_true")
+    parser.add_argument("--transport-tariffs-file", help="Path to TransportTariffs data file.")
+    parser.add_argument("--transport-tariff-locals-file", help="Path to TransportTariffLocals data file.")
+    parser.add_argument("--transport-year-amounts-file", help="Path to TransportYearAmounts data file.")
+    parser.add_argument("--transport-year-amount-locals-file", help="Path to TransportYearAmountLocals data file.")
     return parser
 
 
-def _add_sync_flag_arguments(parser: argparse.ArgumentParser) -> None:
-    for field_name in SyncDbPayload.model_fields:
-        parser.add_argument(
-            f"--{field_name.replace('_', '-')}",
-            action="store_true",
-            help=f"Enable {field_name}.",
-        )
-
-
 def build_payload_from_args(args: argparse.Namespace) -> SyncDbPayload:
-    payload_data = {
-        field_name: bool(getattr(args, field_name))
-        for field_name in SyncDbPayload.model_fields
-    }
-    return SyncDbPayload.model_validate(payload_data)
+    return SyncDbPayload(
+        sync_transport_tariffs=bool(args.sync_transport_tariffs),
+        sync_transport_year_amounts=bool(args.sync_transport_year_amounts),
+    )
 
 
 def configure_logging(*, log_level: str) -> logging.Logger:
@@ -789,29 +724,87 @@ def configure_logging(*, log_level: str) -> logging.Logger:
         level=getattr(logging, log_level.upper()),
         format="%(asctime)s %(levelname)s %(message)s",
     )
-    return logging.getLogger("sqlserver_reference_sync")
+    return logging.getLogger("sqlserver_reference_import")
 
 
-def format_summary(summary: SyncCommandSummary) -> str:
+def format_summary(summary: DataSyncSummary) -> str:
     return (
-        "servers_processed="
-        f"{summary.servers_processed}\n"
-        f"selected_models={summary.selected_models}\n"
-        f"model_runs_attempted={summary.model_runs_attempted}\n"
-        f"successful_model_runs={summary.successful_model_runs}\n"
+        f"targets_processed={summary.targets_processed}\n"
+        f"selected_tables={summary.selected_tables}\n"
+        f"table_runs_attempted={summary.table_runs_attempted}\n"
+        f"successful_table_runs={summary.successful_table_runs}\n"
+        f"skipped_row_count={summary.skipped_row_count}\n"
         f"error_count={summary.error_count}\n"
         f"output_file={summary.output_path}"
     )
 
 
+def format_errors(errors: Sequence[DataSyncError], *, max_items: int = 10) -> str:
+    if not errors:
+        return ""
+    lines = ["errors:"]
+    for index, error in enumerate(errors[:max_items], start=1):
+        lines.append(
+            f"{index}. target_host={error.target_host} "
+            f"target_database={error.target_database} "
+            f"sync_flag={error.sync_flag} "
+            f"model_name={error.model_name} "
+            f"source_row={error.source_row} "
+            f"error_message={error.error_message}"
+        )
+    if len(errors) > max_items:
+        lines.append(f"... and {len(errors) - max_items} more error(s)")
+    return "\n".join(lines)
+
+
+def format_skipped_rows(
+    skipped_rows: Sequence[DataSyncSkippedRow],
+    *,
+    max_items: int = 10,
+) -> str:
+    if not skipped_rows:
+        return ""
+    lines = ["skipped_rows:"]
+    for index, skipped_row in enumerate(skipped_rows[:max_items], start=1):
+        lines.append(
+            f"{index}. target_host={skipped_row.target_host} "
+            f"target_database={skipped_row.target_database} "
+            f"sync_flag={skipped_row.sync_flag} "
+            f"model_name={skipped_row.model_name} "
+            f"source_row={skipped_row.source_row} "
+            f"row_identifier={skipped_row.row_identifier} "
+            f"reference_value={skipped_row.reference_value} "
+            f"reason={skipped_row.reason}"
+        )
+    if len(skipped_rows) > max_items:
+        lines.append(f"... and {len(skipped_rows) - max_items} more skipped row(s)")
+    return "\n".join(lines)
+
+
+def format_command_output(
+    summary: DataSyncSummary,
+    errors: Sequence[DataSyncError],
+    skipped_rows: Sequence[DataSyncSkippedRow],
+) -> str:
+    output_sections = [format_summary(summary)]
+    skipped_rows_text = format_skipped_rows(skipped_rows)
+    if skipped_rows_text:
+        output_sections.append(skipped_rows_text)
+    errors_text = format_errors(errors)
+    if errors_text:
+        output_sections.append(errors_text)
+    return "\n".join(output_sections)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    logger = configure_logging(log_level=args.log_level)
     payload = build_payload_from_args(args)
-    command = SyncDbMultiServerCommand(
-        input_reader=SyncServerInputReader(),
-        model_catalog=SyncModelCatalog(),
+    logger = configure_logging(log_level=args.log_level)
+    command = SyncSqlServerReferenceDataCommand(
+        target_reader=TargetServerInputReader(),
+        data_reader=ReferenceDataFileReader(),
+        plan_builder=SyncPlanBuilder(),
         executor=SqlServerModelSyncExecutor(
             engine_factory=SqlServerEngineFactory(
                 driver=args.driver,
@@ -826,16 +819,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         logger=logger,
     )
     summary = command.run(
-        input_path=Path(args.input).resolve(),
+        targets_input_path=Path(args.targets_input).resolve(),
         output_path=Path(args.output).resolve(),
         payload=payload,
-        source_database=args.source_database,
-        target_database=args.target_database,
-        linked_server_name=args.linked_server_name,
+        args=args,
     )
-    summary_text = format_summary(summary)
-    logger.info("sync_command_completed\n%s", summary_text)
-    print(summary_text)
+    print(format_command_output(summary, command.last_errors, command.last_skipped_rows))
     return 0
 
 
