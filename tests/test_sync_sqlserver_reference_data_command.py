@@ -1,8 +1,11 @@
 import json
 from pathlib import Path
 
+from openpyxl import load_workbook
+
 from app.commands.sync_sqlserver_reference_data import (
     DataSyncError,
+    DataSyncSkippedRow,
     DataSyncSummary,
     ReferenceDataFileReader,
     SyncDbPayload,
@@ -198,6 +201,70 @@ def test_command_skips_missing_reference_rows_and_reports_them(tmp_path: Path) -
     assert "skip شد" in report_payload["skipped_rows"][0]["reason"]
 
 
+def test_excel_report_writes_simple_skipped_rows_sheet(tmp_path: Path) -> None:
+    output_path = tmp_path / "report.xlsx"
+    writer = SyncReportWriter()
+
+    writer.save(
+        output_path=output_path,
+        summary=DataSyncSummary(
+            targets_processed=1,
+            selected_tables=1,
+            table_runs_attempted=1,
+            successful_table_runs=1,
+            skipped_row_count=1,
+            error_count=0,
+            output_path=output_path,
+        ),
+        results=[],
+        errors=[],
+        skipped_rows=[
+            DataSyncSkippedRow(
+                target_host="192.168.1.10",
+                target_database="db_one",
+                sync_flag="sync_transport_year_amounts",
+                model_name="TransportYearAmountLocals",
+                data_file="input.csv",
+                source_row=8,
+                row_identifier="id=80588",
+                reference_table="Trp.TransportTariffLocals",
+                reference_column="TransportTariffLocalId",
+                reference_value="1212",
+                reason="skip reason",
+            )
+        ],
+    )
+
+    workbook = load_workbook(output_path)
+    try:
+        sheet = workbook["skipped_rows"]
+        headers = [sheet.cell(row=1, column=index).value for index in range(1, 9)]
+        first_data_row = [sheet.cell(row=2, column=index).value for index in range(1, 9)]
+        assert headers == [
+            "ردیف فایل",
+            "دیتابیس",
+            "سرور",
+            "جدول",
+            "شناسه ردیف",
+            "ستون مرجع",
+            "مقدار مرجع",
+            "توضیح",
+        ]
+        assert first_data_row == [
+            8,
+            "db_one",
+            "192.168.1.10",
+            "TransportYearAmountLocals",
+            "id=80588",
+            "TransportTariffLocalId",
+            "1212",
+            "skip reason",
+        ]
+        assert sheet.freeze_panes == "A2"
+    finally:
+        workbook.close()
+
+
 def test_format_command_output_includes_error_messages() -> None:
     summary = DataSyncSummary(
         targets_processed=1,
@@ -223,3 +290,38 @@ def test_format_command_output_includes_error_messages() -> None:
 
     assert "error_count=1" in output_text
     assert "error_message=Could not connect" in output_text
+
+
+def test_format_command_output_references_report_for_skipped_rows() -> None:
+    summary = DataSyncSummary(
+        targets_processed=1,
+        selected_tables=1,
+        table_runs_attempted=1,
+        successful_table_runs=1,
+        skipped_row_count=1,
+        error_count=0,
+        output_path=Path("report.xlsx"),
+    )
+
+    output_text = format_command_output(
+        summary,
+        [],
+        [
+            DataSyncSkippedRow(
+                target_host="192.168.1.10",
+                target_database="db_one",
+                sync_flag="sync_transport_year_amounts",
+                model_name="TransportYearAmountLocals",
+                data_file="input.csv",
+                source_row=8,
+                row_identifier="id=80588",
+                reference_table="Trp.TransportTariffLocals",
+                reference_column="TransportTariffLocalId",
+                reference_value="1212",
+                reason="skip reason",
+            )
+        ],
+    )
+
+    assert "skipped_rows_report=Details were written" in output_text
+    assert "reference_value=1212" not in output_text

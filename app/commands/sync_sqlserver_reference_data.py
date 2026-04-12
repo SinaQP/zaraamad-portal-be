@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Font, PatternFill
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.common.services.sqlserver_reference_sync import (
@@ -362,6 +363,19 @@ class SyncReportWriter:
         "reference_value",
         "reason",
     ]
+    SKIPPED_REVIEW_COLUMNS = [
+        ("source_row", "ردیف فایل"),
+        ("target_database", "دیتابیس"),
+        ("target_host", "سرور"),
+        ("model_name", "جدول"),
+        ("row_identifier", "شناسه ردیف"),
+        ("reference_column", "ستون مرجع"),
+        ("reference_value", "مقدار مرجع"),
+        ("reason", "توضیح"),
+    ]
+    _HEADER_FILL = PatternFill(fill_type="solid", fgColor="1F4E78")
+    _HEADER_FONT = Font(color="FFFFFF", bold=True)
+    _WRAP_ALIGNMENT = Alignment(vertical="top", wrap_text=True)
 
     def save(
         self,
@@ -390,26 +404,66 @@ class SyncReportWriter:
             )
             return
 
-        workbook = Workbook(write_only=True)
+        workbook = Workbook()
+        workbook.remove(workbook.active)
+
         summary_sheet = workbook.create_sheet(title="summary")
         results_sheet = workbook.create_sheet(title="results")
         errors_sheet = workbook.create_sheet(title="errors")
         skipped_sheet = workbook.create_sheet(title="skipped_rows")
+
         summary_sheet.append(["metric", "value"])
         for key, value in summary.__dict__.items():
             summary_sheet.append([key, str(value)])
-        results_sheet.append(self.RESULT_COLUMNS)
-        for result in results:
-            results_sheet.append([getattr(result, column_name) for column_name in self.RESULT_COLUMNS])
-        errors_sheet.append(self.ERROR_COLUMNS)
-        for error in errors:
-            errors_sheet.append([getattr(error, column_name) for column_name in self.ERROR_COLUMNS])
-        skipped_sheet.append(self.SKIPPED_COLUMNS)
-        for skipped_row in skipped_rows:
-            skipped_sheet.append(
-                [getattr(skipped_row, column_name) for column_name in self.SKIPPED_COLUMNS]
-            )
+        self._style_sheet(summary_sheet)
+
+        self._append_table_sheet(
+            sheet=results_sheet,
+            columns=[(column_name, column_name) for column_name in self.RESULT_COLUMNS],
+            rows=results,
+        )
+        self._append_table_sheet(
+            sheet=errors_sheet,
+            columns=[(column_name, column_name) for column_name in self.ERROR_COLUMNS],
+            rows=errors,
+        )
+        self._append_table_sheet(
+            sheet=skipped_sheet,
+            columns=self.SKIPPED_REVIEW_COLUMNS,
+            rows=skipped_rows,
+        )
         workbook.save(output_path)
+
+    def _append_table_sheet(
+        self,
+        *,
+        sheet,
+        columns: Sequence[tuple[str, str]],
+        rows: Sequence[object],
+    ) -> None:
+        sheet.append([label for _, label in columns])
+        for row in rows:
+            sheet.append([getattr(row, field_name) for field_name, _ in columns])
+        self._style_sheet(sheet)
+
+    def _style_sheet(self, sheet) -> None:
+        if sheet.max_row < 1 or sheet.max_column < 1:
+            return
+        for cell in sheet[1]:
+            cell.fill = self._HEADER_FILL
+            cell.font = self._HEADER_FONT
+            cell.alignment = self._WRAP_ALIGNMENT
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = sheet.dimensions
+        for column_cells in sheet.columns:
+            max_length = 0
+            for cell in column_cells:
+                text_value = "" if cell.value is None else str(cell.value)
+                if len(text_value) > max_length:
+                    max_length = len(text_value)
+                cell.alignment = self._WRAP_ALIGNMENT
+            column_letter = column_cells[0].column_letter
+            sheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 48)
 
 
 class SyncSqlServerReferenceDataCommand:
@@ -759,26 +813,13 @@ def format_errors(errors: Sequence[DataSyncError], *, max_items: int = 10) -> st
 
 def format_skipped_rows(
     skipped_rows: Sequence[DataSyncSkippedRow],
-    *,
-    max_items: int = 10,
 ) -> str:
     if not skipped_rows:
         return ""
-    lines = ["skipped_rows:"]
-    for index, skipped_row in enumerate(skipped_rows[:max_items], start=1):
-        lines.append(
-            f"{index}. target_host={skipped_row.target_host} "
-            f"target_database={skipped_row.target_database} "
-            f"sync_flag={skipped_row.sync_flag} "
-            f"model_name={skipped_row.model_name} "
-            f"source_row={skipped_row.source_row} "
-            f"row_identifier={skipped_row.row_identifier} "
-            f"reference_value={skipped_row.reference_value} "
-            f"reason={skipped_row.reason}"
-        )
-    if len(skipped_rows) > max_items:
-        lines.append(f"... and {len(skipped_rows) - max_items} more skipped row(s)")
-    return "\n".join(lines)
+    return (
+        "skipped_rows_report=Details were written to the "
+        "'skipped_rows' section of the output report."
+    )
 
 
 def format_command_output(
