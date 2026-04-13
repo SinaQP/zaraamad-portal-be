@@ -6,14 +6,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.version import VERSION as BUILD_VERSION
 
+DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/zaraamad_portal"
+
 
 class Settings(BaseSettings):
     app_name: str = "Zaraamad Portal API"
     app_version: str = BUILD_VERSION
     app_env: str = "development"
     form_service_debug: bool = False
-    database_url: str = (
-        "postgresql+psycopg://postgres:postgres@localhost:5432/zaraamad_portal"
+    database_url: str = DEFAULT_DATABASE_URL
+    sqlserver_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SQLSERVER_URL", "CENTRAL_DATABASE_URL"),
     )
     jwt_signing_key: str = Field(
         default="change-me",
@@ -81,7 +85,6 @@ class Settings(BaseSettings):
                 if isinstance(origin, str) and origin.strip()
             ]
         return value
-
 
 @lru_cache
 def get_settings() -> Settings:
