@@ -1,4 +1,4 @@
-from app.common.config import DEFAULT_DATABASE_URL, Settings, get_settings
+from app.common.config import DEFAULT_DATABASE_URL, Settings
 
 
 def test_get_settings_uses_database_url_env(monkeypatch):

@@ -17,6 +17,7 @@ from app.modules.auth.module import router as auth_router
 from app.modules.customers.module import router as customer_router
 from app.modules.feedback.module import router as feedback_router
 from app.modules.forms.module import router as forms_router
+from app.modules.health.module import router as health_router
 from app.modules.service_catalog.module import router as service_catalog_router
 from app.modules.users.module import router as user_router
 
@@ -24,6 +25,10 @@ OPENAPI_TAGS = [
     {
         "name": "auth",
         "description": "Authentication and current-user access endpoints.",
+    },
+    {
+        "name": "health",
+        "description": "Application dependency health endpoints.",
     },
     {
         "name": "users",
@@ -108,6 +113,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(auth_router)
+    app.include_router(health_router)
     app.include_router(user_router)
     app.include_router(feedback_router)
     app.include_router(forms_router)
