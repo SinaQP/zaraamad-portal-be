@@ -43,6 +43,46 @@ class CustomerBridgeConfig(Base, TimestampMixin):
     last_subscription_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
 
+class CustomerDatabaseConnection(Base, TimestampMixin):
+    __tablename__ = "customer_database_connections"
+
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    db_kind: Mapped[str] = mapped_column(String(50), nullable=False, default="sqlserver", server_default="sqlserver")
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    port: Mapped[int] = mapped_column(Integer, nullable=False, default=1433, server_default="1433")
+    database_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    username: Mapped[str] = mapped_column(String(255), nullable=False)
+    secret_ref: Mapped[str] = mapped_column(String(500), nullable=False)
+    secret_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    driver_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    encrypt_connection: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+    trust_server_certificate: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+    credential_rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rotation_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_connection_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_connection_test_success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    last_connection_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+
 class CustomerIncomeSummary(Base, TimestampMixin):
     __tablename__ = "customer_income_summaries"
 

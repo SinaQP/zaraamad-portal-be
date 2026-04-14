@@ -6,6 +6,7 @@ from app.modules.customers.dtos import (
     CustomerBridgeConfigOut,
     CustomerBridgeHealthOut,
     CustomerBridgeSubscriptionOut,
+    CustomerDatabaseConnectionOut,
     CustomerIncomeBucketOut,
     CustomerIncomeCustomerOut,
     CustomerIncomeDetailOut,
@@ -18,6 +19,7 @@ from app.modules.customers.dtos import (
 from app.modules.customers.schemas import (
     Customer,
     CustomerBridgeConfig,
+    CustomerDatabaseConnection,
     CustomerIncomeBucket,
     CustomerIncomeMonthlyReport,
     CustomerIncomeSummary,
@@ -50,6 +52,34 @@ class CustomerMapper:
             last_online_status=bridge_config.last_online_status if bridge_config else None,
             last_health_checked_at=bridge_config.last_health_checked_at if bridge_config else None,
             last_health_error=bridge_config.last_health_error if bridge_config else None,
+        )
+
+    def to_database_connection_out(
+        self,
+        customer: Customer,
+        database_connection: CustomerDatabaseConnection | None,
+    ) -> CustomerDatabaseConnectionOut | None:
+        if database_connection is None:
+            return None
+        return CustomerDatabaseConnectionOut(
+            customer_id=customer.id,
+            customer_name=customer.name,
+            db_kind=database_connection.db_kind,
+            host=database_connection.host,
+            port=database_connection.port,
+            database_name=database_connection.database_name,
+            username=database_connection.username,
+            driver_name=database_connection.driver_name,
+            encrypt_connection=database_connection.encrypt_connection,
+            trust_server_certificate=database_connection.trust_server_certificate,
+            is_active=database_connection.is_active,
+            has_secret_ref=bool(database_connection.secret_ref),
+            secret_version=database_connection.secret_version,
+            credential_rotated_at=database_connection.credential_rotated_at,
+            rotation_due_at=database_connection.rotation_due_at,
+            last_connection_tested_at=database_connection.last_connection_tested_at,
+            last_connection_test_success=database_connection.last_connection_test_success,
+            last_connection_error=database_connection.last_connection_error,
         )
 
     def to_bridge_health_out(

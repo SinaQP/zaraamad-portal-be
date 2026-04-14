@@ -19,6 +19,7 @@ _CUSTOM_VALUE_ERROR_TRANSLATIONS = {
     "At least one of subscription or messages must be provided.": messages.SUBSCRIPTION_CONFIG_UPDATE_REQUIRED,
     "Invalid Jalali date format. Use YYYY-MM-DD.": messages.INVALID_JALALI_DATE,
     "Invalid Jalali datetime format. Use YYYY-MM-DD HH:MM:SS.": messages.INVALID_JALALI_DATETIME,
+    "At least one customer database connection field must be provided.": messages.INVALID_REQUEST,
 }
 
 _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {

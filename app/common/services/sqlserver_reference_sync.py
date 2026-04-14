@@ -28,6 +28,9 @@ class SqlServerConnectionSettings:
     username: str
     password: str
     database_name: str
+    driver_name: str | None = None
+    encrypt_connection: bool = True
+    trust_server_certificate: bool = False
 
 
 @dataclass(frozen=True)
@@ -158,6 +161,7 @@ class SqlServerEngineFactory:
 
     def create_engine(self, settings: SqlServerConnectionSettings):
         self._ensure_pyodbc_available()
+        driver_name = settings.driver_name or self._driver
         url = URL.create(
             "mssql+pyodbc",
             username=settings.username,
@@ -166,9 +170,9 @@ class SqlServerEngineFactory:
             port=settings.port,
             database=settings.database_name,
             query={
-                "driver": self._driver,
-                "TrustServerCertificate": "yes",
-                "Encrypt": "no",
+                "driver": driver_name,
+                "TrustServerCertificate": "yes" if settings.trust_server_certificate else "no",
+                "Encrypt": "yes" if settings.encrypt_connection else "no",
             },
         )
         return create_engine(

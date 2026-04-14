@@ -24,6 +24,9 @@ from app.common.messages import (
     CUSTOMER_BRIDGE_REQUEST_FAILED,
     CUSTOMER_BRIDGE_SUBSCRIPTION_NOT_CACHED,
     CUSTOMER_BRIDGE_UNAVAILABLE,
+    CUSTOMER_DATABASE_CONNECTION_INCOMPLETE,
+    CUSTOMER_DATABASE_CONNECTION_NOT_FOUND,
+    CUSTOMER_DATABASE_PASSWORD_REQUIRED,
     CUSTOMER_ID_INVALID_OR_INACTIVE,
     CUSTOMER_INCOME_BUCKET_TOTAL_MISMATCH,
     CUSTOMER_NOT_FOUND,
@@ -47,9 +50,12 @@ from app.common.services.bridge_client import (
     BridgeUnexpectedStatusError,
     get_bridge_client,
 )
+from app.common.services.sqlserver_reference_sync import SqlServerConnectionSettings
 from app.modules.customers.dtos import (
     CustomerBridgeConfigUpdate,
     CustomerCreate,
+    CustomerDatabaseConnectionCreate,
+    CustomerDatabaseConnectionUpdate,
     CustomerIncomeBulkUpsertCreate,
     CustomerIncomeBulkUpsertItemCreate,
     CustomerUpdate,
@@ -57,6 +63,7 @@ from app.modules.customers.dtos import (
 from app.modules.customers.schemas import (
     Customer,
     CustomerBridgeConfig,
+    CustomerDatabaseConnection,
     CustomerIncomeBucket,
     CustomerIncomeMonthlyReport,
     CustomerIncomeSummary,
@@ -387,6 +394,164 @@ class CustomerBridgeConfigService:
             .order_by(CustomerBridgeConfig.customer_id.asc())
         )
         return list(self._db_session.scalars(query).all())
+
+
+class CustomerDatabaseConnectionService:
+    SECRET_MASK_TOKENS = ("password", "pwd", "secret", "token")
+
+    def __init__(
+        self,
+        db_session: Session,
+        customer_service: CustomerService,
+    ) -> None:
+        self._db_session = db_session
+        self._customer_service = customer_service
+
+    def get(self, customer_id: int) -> tuple[Customer, CustomerDatabaseConnection | None]:
+        customer = self._customer_service.get_or_404(customer_id=customer_id)
+        database_connection = self._db_session.get(CustomerDatabaseConnection, customer_id)
+        return customer, database_connection
+
+    def get_active(self, customer_id: int) -> tuple[Customer, CustomerDatabaseConnection]:
+        customer = self._customer_service.get_active_or_404(customer_id=customer_id)
+        database_connection = self._db_session.get(CustomerDatabaseConnection, customer_id)
+        if database_connection is None or not database_connection.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=CUSTOMER_DATABASE_CONNECTION_NOT_FOUND,
+            )
+        return customer, database_connection
+
+    def upsert(
+        self,
+        customer_id: int,
+        dto: CustomerDatabaseConnectionCreate | CustomerDatabaseConnectionUpdate,
+    ) -> tuple[Customer, CustomerDatabaseConnection]:
+        customer, database_connection = self.get(customer_id=customer_id)
+        if database_connection is None:
+            database_connection = CustomerDatabaseConnection(customer_id=customer_id)
+            self._db_session.add(database_connection)
+        update_data = dto.model_dump(exclude_unset=True, exclude_none=False)
+        for field_name, field_value in update_data.items():
+            setattr(database_connection, field_name, field_value)
+        database_connection.last_connection_test_success = None
+        database_connection.last_connection_tested_at = None
+        database_connection.last_connection_error = None
+        try:
+            self._db_session.commit()
+        except IntegrityError as exc:
+            self._db_session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=DATA_INTEGRITY_ERROR,
+            ) from exc
+        self._db_session.refresh(database_connection)
+        return customer, database_connection
+
+    def mark_rotation(
+        self,
+        *,
+        customer_id: int,
+        rotated_at: datetime,
+        next_rotation_due_at: datetime | None,
+        secret_version: str | None,
+    ) -> tuple[Customer, CustomerDatabaseConnection]:
+        customer, database_connection = self.get_active(customer_id=customer_id)
+        database_connection.credential_rotated_at = rotated_at
+        database_connection.rotation_due_at = next_rotation_due_at
+        database_connection.secret_version = secret_version
+        database_connection.last_connection_test_success = None
+        database_connection.last_connection_tested_at = None
+        database_connection.last_connection_error = None
+        self._db_session.commit()
+        self._db_session.refresh(database_connection)
+        return customer, database_connection
+
+    def persist_connection_test_result(
+        self,
+        *,
+        customer_id: int,
+        checked_at: datetime,
+        is_success: bool,
+        error_message: str | None = None,
+    ) -> tuple[Customer, CustomerDatabaseConnection]:
+        customer, database_connection = self.get_active(customer_id=customer_id)
+        database_connection.last_connection_tested_at = checked_at
+        database_connection.last_connection_test_success = is_success
+        database_connection.last_connection_error = (
+            None if is_success else self._sanitize_error_message(error_message)
+        )
+        self._db_session.commit()
+        self._db_session.refresh(database_connection)
+        return customer, database_connection
+
+    def build_sqlserver_connection_settings(
+        self,
+        *,
+        customer_id: int,
+        password: str | None,
+    ) -> tuple[Customer, CustomerDatabaseConnection, SqlServerConnectionSettings]:
+        customer, database_connection = self.get_active(customer_id=customer_id)
+        if database_connection.db_kind.strip().lower() != "sqlserver":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "message": CUSTOMER_DATABASE_CONNECTION_INCOMPLETE,
+                    "developer_message": (
+                        "Customer database connection db_kind must be 'sqlserver' "
+                        "to build SQL Server settings."
+                    ),
+                },
+            )
+        normalized_password = self._normalize_password(password)
+        if normalized_password is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "message": CUSTOMER_DATABASE_PASSWORD_REQUIRED,
+                    "developer_message": (
+                        "Secret manager returned an empty password for the customer "
+                        "database connection."
+                    ),
+                },
+            )
+        if not database_connection.secret_ref:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "message": CUSTOMER_DATABASE_CONNECTION_INCOMPLETE,
+                    "developer_message": "Customer database connection is missing the secret_ref value.",
+                },
+            )
+        return customer, database_connection, SqlServerConnectionSettings(
+            host=database_connection.host,
+            port=database_connection.port,
+            username=database_connection.username,
+            password=normalized_password,
+            database_name=database_connection.database_name,
+            driver_name=database_connection.driver_name,
+            encrypt_connection=database_connection.encrypt_connection,
+            trust_server_certificate=database_connection.trust_server_certificate,
+        )
+
+    def _normalize_password(self, password: str | None) -> str | None:
+        if password is None:
+            return None
+        normalized_password = password.strip()
+        return normalized_password or None
+
+    def _sanitize_error_message(self, error_message: str | None) -> str | None:
+        if error_message is None:
+            return None
+        normalized_error_message = error_message.strip()
+        if not normalized_error_message:
+            return None
+        sanitized_message = normalized_error_message
+        for token in self.SECRET_MASK_TOKENS:
+            sanitized_message = sanitized_message.replace(token, "***")
+            sanitized_message = sanitized_message.replace(token.upper(), "***")
+            sanitized_message = sanitized_message.replace(token.capitalize(), "***")
+        return sanitized_message[:1000]
 
 
 DEFAULT_IMPORTED_CUSTOMER_GRADE = 1
@@ -1916,4 +2081,14 @@ def get_customer_bridge_service(
         bridge_config_service=customer_bridge_config_service,
         bridge_client=bridge_client,
         settings=settings,
+    )
+
+
+def get_customer_database_connection_service(
+    db_session: Session = Depends(get_db_session),
+    customer_service: CustomerService = Depends(get_customer_service),
+) -> CustomerDatabaseConnectionService:
+    return CustomerDatabaseConnectionService(
+        db_session=db_session,
+        customer_service=customer_service,
     )
