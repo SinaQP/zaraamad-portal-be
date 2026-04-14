@@ -1899,24 +1899,34 @@ class CustomerBridgeService:
                 },
             )
         if isinstance(exc, BridgeUnauthorizedError):
+            debug_context = self._build_upstream_debug_context(
+                status_code=exc.status_code,
+                response_body=exc.response_body,
+            )
             return HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={
                     "message": CUSTOMER_BRIDGE_AUTH_FAILED,
                     "developer_message": (
                         f"Bridge request for customer {customer.id} was rejected with "
-                        f"status {exc.status_code}."
+                        f"status {exc.status_code} at {bridge_base_url}. "
+                        f"{debug_context}"
                     ),
                 },
             )
         if isinstance(exc, BridgeUnexpectedStatusError):
+            debug_context = self._build_upstream_debug_context(
+                status_code=exc.status_code,
+                response_body=exc.response_body,
+            )
             return HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={
                     "message": CUSTOMER_BRIDGE_REQUEST_FAILED,
                     "developer_message": (
                         f"Bridge request for customer {customer.id} returned "
-                        f"unexpected status {exc.status_code}."
+                        f"unexpected status {exc.status_code} at {bridge_base_url}. "
+                        f"{debug_context}"
                     ),
                 },
             )
@@ -1926,7 +1936,7 @@ class CustomerBridgeService:
                 "message": CUSTOMER_BRIDGE_INVALID_RESPONSE,
                 "developer_message": (
                     f"Bridge response for customer {customer.id} did not match the "
-                    f"expected schema: {exc}"
+                    f"expected schema at {bridge_base_url}: {exc}"
                 ),
             },
         )
@@ -1956,13 +1966,18 @@ class CustomerBridgeService:
                 self._extract_bridge_error_message(response_body=exc.response_body)
                 or "هیچ اشتراک فعالی وجود ندارد."
             )
+            debug_context = self._build_upstream_debug_context(
+                status_code=exc.status_code,
+                response_body=exc.response_body,
+            )
             return HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={
                     "message": upstream_message,
                     "developer_message": (
                         f"Bridge subscription request for customer {customer.id} "
-                        f"at {bridge_base_url} returned status 404."
+                        f"at {bridge_base_url} returned status 404. "
+                        f"{debug_context}"
                     ),
                 },
             )
@@ -2045,6 +2060,38 @@ class CustomerBridgeService:
                 return field_value.strip()
         return None
 
+    def _build_upstream_debug_context(
+        self,
+        *,
+        status_code: int,
+        response_body: str | None,
+    ) -> str:
+        upstream_message = self._extract_bridge_error_message(response_body=response_body)
+        body_excerpt = self._compact_response_body(response_body=response_body)
+        if upstream_message and body_excerpt:
+            if body_excerpt == upstream_message:
+                return f"Upstream message: {upstream_message}"
+            return (
+                f"Upstream message: {upstream_message}. "
+                f"Upstream response body excerpt: {body_excerpt}"
+            )
+        if upstream_message:
+            return f"Upstream message: {upstream_message}"
+        if body_excerpt:
+            return f"Upstream response body excerpt: {body_excerpt}"
+        return f"Upstream response body was empty for status {status_code}."
+
+    def _compact_response_body(self, response_body: str | None) -> str | None:
+        if not response_body:
+            return None
+        compact = " ".join(response_body.split())
+        if not compact:
+            return None
+        max_length = 500
+        if len(compact) <= max_length:
+            return compact
+        return f"{compact[:max_length]}..."
+
 
 def get_customer_service(
     db_session: Session = Depends(get_db_session),
@@ -2092,3 +2139,4 @@ def get_customer_database_connection_service(
         db_session=db_session,
         customer_service=customer_service,
     )
+

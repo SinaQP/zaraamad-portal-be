@@ -294,6 +294,30 @@ class MissingSubscriptionBridgeClient:
             response_body='{"error":"هیچ اشتراک فعالی وجود ندارد."}',
         )
 
+class FailedSubscriptionBridgeClient:
+    def get_health(self, request: BridgeRequest) -> BridgeHealthResult:
+        del request
+        raise AssertionError("health should not be called in this test")
+
+    def get_capabilities(self, request: BridgeRequest) -> BridgeCapabilitiesResult:
+        del request
+        raise AssertionError("capabilities should not be called in this test")
+
+    def get_active_subscription(self, request: BridgeRequest) -> BridgeSubscriptionResult:
+        del request
+        raise BridgeUnexpectedStatusError(
+            status_code=500,
+            response_body='{"error":"database unavailable","request_id":"bridge-err-123"}',
+        )
+
+    def get_subscription_config(self, request: BridgeRequest) -> BridgeSubscriptionConfigResult:
+        del request
+        raise BridgeUnexpectedStatusError(
+            status_code=500,
+            response_body='{"error":"database unavailable","request_id":"bridge-err-123"}',
+        )
+
+
 def test_bridge_client_normalizes_iso_like_jalali_subscription_datetimes() -> None:
     bridge_client = BridgeClient()
 
@@ -734,6 +758,45 @@ def test_customer_bridge_subscription_maps_missing_upstream_subscription_to_not_
             correlation_id=None,
         ),
     )]
+
+
+def test_customer_bridge_subscription_surfaces_upstream_error_details_for_debugging(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    app.dependency_overrides[get_bridge_client] = lambda: FailedSubscriptionBridgeClient()
+    headers = _admin_headers(client=client, db_session=db_session)
+
+    customer_response = client.post(
+        "/customers",
+        headers=headers,
+        json={
+            "name": "Failing Subscription Customer",
+            "grade": 2,
+        },
+    )
+    assert customer_response.status_code == 201
+    customer_id = customer_response.json()["id"]
+
+    bridge_update_response = client.patch(
+        f"/customers/{customer_id}/bridge",
+        headers=headers,
+        json={
+            "bridge_base_url": "https://subscription.example.com/",
+            "bridge_api_key": "bridge-secret",
+            "bridge_is_enabled": True,
+        },
+    )
+    assert bridge_update_response.status_code == 200
+
+    response = client.get(
+        f"/customers/{customer_id}/bridge/subscriptions/active",
+        headers=headers,
+    )
+    assert response.status_code == 502
+    assert "unexpected status 500" in response.json()["developer_message"]
+    assert "database unavailable" in response.json()["developer_message"]
+    assert "bridge-err-123" in response.json()["developer_message"]
 
 
 def test_customer_bridge_refresh_status_caches_offline_result_without_failing(
