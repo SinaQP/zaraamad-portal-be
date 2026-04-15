@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import Depends, HTTPException, status
 from openpyxl import load_workbook
 from sqlalchemy import Select, delete, func, or_, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -26,7 +27,9 @@ from app.common.messages import (
     CUSTOMER_BRIDGE_UNAVAILABLE,
     CUSTOMER_DATABASE_CONNECTION_INCOMPLETE,
     CUSTOMER_DATABASE_CONNECTION_NOT_FOUND,
-    CUSTOMER_DATABASE_PASSWORD_REQUIRED,
+    CUSTOMER_DATABASE_CONNECTION_SECRET_NOT_CONFIGURED,
+    CUSTOMER_DATABASE_CONNECTION_STRING_INVALID,
+    CUSTOMER_DATABASE_CONNECTION_TEST_FAILED,
     CUSTOMER_ID_INVALID_OR_INACTIVE,
     CUSTOMER_INCOME_BUCKET_TOTAL_MISMATCH,
     CUSTOMER_NOT_FOUND,
@@ -34,6 +37,12 @@ from app.common.messages import (
     DUPLICATE_CUSTOMER_INCOME_BUCKET_CODE,
     DUPLICATE_CUSTOMER_INCOME_CUSTOMER,
     DUPLICATE_CUSTOMER_INCOME_REPORT_MONTH,
+)
+from app.common.security.secret_cipher import (
+    SecretCipherConfigurationError,
+    SecretCipherDecryptionError,
+    SecretCipherService,
+    get_secret_cipher_service,
 )
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.common.services.bridge_client import (
@@ -50,7 +59,11 @@ from app.common.services.bridge_client import (
     BridgeUnexpectedStatusError,
     get_bridge_client,
 )
-from app.common.services.sqlserver_reference_sync import SqlServerConnectionSettings
+from app.common.services.sqlserver_reference_sync import (
+    SqlServerConnectionError,
+    SqlServerConnectionSettings,
+    SqlServerEngineFactory,
+)
 from app.modules.customers.dtos import (
     CustomerBridgeConfigUpdate,
     CustomerCreate,
@@ -395,6 +408,97 @@ class CustomerBridgeConfigService:
         )
         return list(self._db_session.scalars(query).all())
 
+class CustomerDatabaseConnectionValidationError(Exception):
+    pass
+
+
+class CustomerDatabaseConnectionRuntimeError(Exception):
+    pass
+
+
+class CustomerDatabaseConnectionVerifier:
+    DEFAULT_DRIVER_NAME = "ODBC Driver 18 for SQL Server"
+    DEFAULT_PORT = 1433
+    DEFAULT_CONNECT_TIMEOUT_SECONDS = 15
+
+    def __init__(self) -> None:
+        self._engine_factory = SqlServerEngineFactory(
+            driver=self.DEFAULT_DRIVER_NAME,
+            connect_timeout=self.DEFAULT_CONNECT_TIMEOUT_SECONDS,
+        )
+
+    def build_settings(self, *, connection_string: str) -> SqlServerConnectionSettings:
+        normalized_connection_string = connection_string.strip()
+        if not normalized_connection_string:
+            raise CustomerDatabaseConnectionValidationError(
+                "Customer database connection string is empty."
+            )
+        try:
+            connection_url = make_url(normalized_connection_string)
+        except Exception as exc:
+            raise CustomerDatabaseConnectionValidationError(
+                "Customer database connection string could not be parsed."
+            ) from exc
+        if connection_url.drivername != "mssql+pyodbc":
+            raise CustomerDatabaseConnectionValidationError(
+                "Customer database connection must use the mssql+pyodbc driver."
+            )
+        if not connection_url.host:
+            raise CustomerDatabaseConnectionValidationError(
+                "Customer database connection host is required."
+            )
+        if not connection_url.username:
+            raise CustomerDatabaseConnectionValidationError(
+                "Customer database connection username is required."
+            )
+        if connection_url.password is None or not str(connection_url.password).strip():
+            raise CustomerDatabaseConnectionValidationError(
+                "Customer database connection password is required."
+            )
+        if not connection_url.database:
+            raise CustomerDatabaseConnectionValidationError(
+                "Customer database connection database name is required."
+            )
+        query_lookup = {
+            str(key).strip().lower(): str(value).strip()
+            for key, value in connection_url.query.items()
+        }
+        return SqlServerConnectionSettings(
+            host=connection_url.host,
+            port=connection_url.port or self.DEFAULT_PORT,
+            username=connection_url.username,
+            password=str(connection_url.password),
+            database_name=connection_url.database,
+            driver_name=query_lookup.get("driver") or self.DEFAULT_DRIVER_NAME,
+            encrypt_connection=self._parse_connection_flag(
+                raw_value=query_lookup.get("encrypt"),
+                default=True,
+            ),
+            trust_server_certificate=self._parse_connection_flag(
+                raw_value=query_lookup.get("trustservercertificate"),
+                default=False,
+            ),
+        )
+
+    def test_connection(self, *, connection_string: str) -> None:
+        settings = self.build_settings(connection_string=connection_string)
+        try:
+            self._engine_factory._check_connection(settings=settings)
+        except SqlServerConnectionError as exc:
+            raise CustomerDatabaseConnectionRuntimeError(
+                "Customer database connection test failed."
+            ) from exc
+
+    def _parse_connection_flag(self, *, raw_value: str | None, default: bool) -> bool:
+        if raw_value is None:
+            return default
+        normalized_value = raw_value.strip().lower()
+        if normalized_value in {"1", "true", "yes"}:
+            return True
+        if normalized_value in {"0", "false", "no"}:
+            return False
+        return default
+
 
 class CustomerDatabaseConnectionService:
     SECRET_MASK_TOKENS = ("password", "pwd", "secret", "token")
@@ -403,9 +507,13 @@ class CustomerDatabaseConnectionService:
         self,
         db_session: Session,
         customer_service: CustomerService,
+        secret_cipher_service: SecretCipherService,
+        verifier: CustomerDatabaseConnectionVerifier,
     ) -> None:
         self._db_session = db_session
         self._customer_service = customer_service
+        self._secret_cipher_service = secret_cipher_service
+        self._verifier = verifier
 
     def get(self, customer_id: int) -> tuple[Customer, CustomerDatabaseConnection | None]:
         customer = self._customer_service.get_or_404(customer_id=customer_id)
@@ -429,11 +537,22 @@ class CustomerDatabaseConnectionService:
     ) -> tuple[Customer, CustomerDatabaseConnection]:
         customer, database_connection = self.get(customer_id=customer_id)
         if database_connection is None:
-            database_connection = CustomerDatabaseConnection(customer_id=customer_id)
+            database_connection = CustomerDatabaseConnection(
+                customer_id=customer_id,
+                db_kind="sqlserver",
+            )
             self._db_session.add(database_connection)
         update_data = dto.model_dump(exclude_unset=True, exclude_none=False)
+        connection_string = update_data.pop("connection_string", None)
         for field_name, field_value in update_data.items():
             setattr(database_connection, field_name, field_value)
+        if connection_string is not None:
+            self._apply_encrypted_connection_string(
+                database_connection=database_connection,
+                connection_string=connection_string,
+            )
+            if "credential_rotated_at" not in update_data:
+                database_connection.credential_rotated_at = datetime.now(timezone.utc)
         database_connection.last_connection_test_success = None
         database_connection.last_connection_tested_at = None
         database_connection.last_connection_error = None
@@ -489,56 +608,151 @@ class CustomerDatabaseConnectionService:
         self,
         *,
         customer_id: int,
-        password: str | None,
     ) -> tuple[Customer, CustomerDatabaseConnection, SqlServerConnectionSettings]:
         customer, database_connection = self.get_active(customer_id=customer_id)
-        if database_connection.db_kind.strip().lower() != "sqlserver":
+        decrypted_connection_string = self._decrypt_connection_string(
+            database_connection=database_connection,
+        )
+        settings = self._verifier.build_settings(
+            connection_string=decrypted_connection_string,
+        )
+        return customer, database_connection, settings
+
+    def test_connection(
+        self,
+        *,
+        customer_id: int,
+    ) -> tuple[Customer, CustomerDatabaseConnection]:
+        customer, database_connection = self.get_active(customer_id=customer_id)
+        decrypted_connection_string = self._decrypt_connection_string(
+            database_connection=database_connection,
+        )
+        checked_at = datetime.now(timezone.utc)
+        try:
+            self._verifier.test_connection(
+                connection_string=decrypted_connection_string,
+            )
+        except CustomerDatabaseConnectionValidationError as exc:
+            self.persist_connection_test_result(
+                customer_id=customer_id,
+                checked_at=checked_at,
+                is_success=False,
+                error_message=str(exc),
+            )
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={
-                    "message": CUSTOMER_DATABASE_CONNECTION_INCOMPLETE,
-                    "developer_message": (
-                        "Customer database connection db_kind must be 'sqlserver' "
-                        "to build SQL Server settings."
-                    ),
+                    "message": CUSTOMER_DATABASE_CONNECTION_STRING_INVALID,
+                    "developer_message": str(exc),
                 },
+            ) from exc
+        except CustomerDatabaseConnectionRuntimeError as exc:
+            self.persist_connection_test_result(
+                customer_id=customer_id,
+                checked_at=checked_at,
+                is_success=False,
+                error_message=str(exc),
             )
-        normalized_password = self._normalize_password(password)
-        if normalized_password is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={
-                    "message": CUSTOMER_DATABASE_PASSWORD_REQUIRED,
-                    "developer_message": (
-                        "Secret manager returned an empty password for the customer "
-                        "database connection."
-                    ),
+                    "message": CUSTOMER_DATABASE_CONNECTION_TEST_FAILED,
+                    "developer_message": self._sanitize_error_message(str(exc))
+                    or "Customer database connection test failed.",
                 },
-            )
-        if not database_connection.secret_ref:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "message": CUSTOMER_DATABASE_CONNECTION_INCOMPLETE,
-                    "developer_message": "Customer database connection is missing the secret_ref value.",
-                },
-            )
-        return customer, database_connection, SqlServerConnectionSettings(
-            host=database_connection.host,
-            port=database_connection.port,
-            username=database_connection.username,
-            password=normalized_password,
-            database_name=database_connection.database_name,
-            driver_name=database_connection.driver_name,
-            encrypt_connection=database_connection.encrypt_connection,
-            trust_server_certificate=database_connection.trust_server_certificate,
+            ) from exc
+        return self.persist_connection_test_result(
+            customer_id=customer_id,
+            checked_at=checked_at,
+            is_success=True,
+            error_message=None,
         )
 
-    def _normalize_password(self, password: str | None) -> str | None:
-        if password is None:
-            return None
-        normalized_password = password.strip()
-        return normalized_password or None
+    def _apply_encrypted_connection_string(
+        self,
+        *,
+        database_connection: CustomerDatabaseConnection,
+        connection_string: str,
+    ) -> None:
+        try:
+            settings = self._verifier.build_settings(
+                connection_string=connection_string,
+            )
+            encrypted_connection_string = self._secret_cipher_service.encrypt(
+                connection_string.strip(),
+            )
+            connection_string_hash = self._secret_cipher_service.fingerprint(
+                connection_string.strip(),
+            )
+        except CustomerDatabaseConnectionValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "message": CUSTOMER_DATABASE_CONNECTION_STRING_INVALID,
+                    "developer_message": str(exc),
+                },
+            ) from exc
+        except SecretCipherConfigurationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "message": CUSTOMER_DATABASE_CONNECTION_SECRET_NOT_CONFIGURED,
+                    "developer_message": str(exc),
+                },
+            ) from exc
+        database_connection.db_kind = "sqlserver"
+        database_connection.encrypted_connection_string = encrypted_connection_string
+        database_connection.connection_string_hash = connection_string_hash
+        database_connection.host = None
+        database_connection.port = None
+        database_connection.database_name = None
+        database_connection.username = None
+        database_connection.secret_ref = None
+        database_connection.driver_name = settings.driver_name
+        database_connection.encrypt_connection = settings.encrypt_connection
+        database_connection.trust_server_certificate = settings.trust_server_certificate
+
+    def _decrypt_connection_string(
+        self,
+        *,
+        database_connection: CustomerDatabaseConnection,
+    ) -> str:
+        if not database_connection.encrypted_connection_string:
+            if database_connection.secret_ref:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "message": CUSTOMER_DATABASE_CONNECTION_INCOMPLETE,
+                        "developer_message": (
+                            "Legacy customer database connection fields exist without "
+                            "an encrypted connection string."
+                        ),
+                    },
+                )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=CUSTOMER_DATABASE_CONNECTION_NOT_FOUND,
+            )
+        try:
+            return self._secret_cipher_service.decrypt(
+                database_connection.encrypted_connection_string,
+            )
+        except SecretCipherConfigurationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "message": CUSTOMER_DATABASE_CONNECTION_SECRET_NOT_CONFIGURED,
+                    "developer_message": str(exc),
+                },
+            ) from exc
+        except SecretCipherDecryptionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "message": CUSTOMER_DATABASE_CONNECTION_INCOMPLETE,
+                    "developer_message": str(exc),
+                },
+            ) from exc
 
     def _sanitize_error_message(self, error_message: str | None) -> str | None:
         if error_message is None:
@@ -2131,12 +2345,20 @@ def get_customer_bridge_service(
     )
 
 
+def get_customer_database_connection_verifier() -> CustomerDatabaseConnectionVerifier:
+    return CustomerDatabaseConnectionVerifier()
+
+
 def get_customer_database_connection_service(
     db_session: Session = Depends(get_db_session),
     customer_service: CustomerService = Depends(get_customer_service),
+    secret_cipher_service: SecretCipherService = Depends(get_secret_cipher_service),
+    verifier: CustomerDatabaseConnectionVerifier = Depends(get_customer_database_connection_verifier),
 ) -> CustomerDatabaseConnectionService:
     return CustomerDatabaseConnectionService(
         db_session=db_session,
         customer_service=customer_service,
+        secret_cipher_service=secret_cipher_service,
+        verifier=verifier,
     )
 

@@ -2,7 +2,7 @@
 
 Backend API for Zaraamad Portal Phase 1.
 
-Current release: `1.3.0`
+Current release: `1.4.0`
 
 ## Overview
 
@@ -120,6 +120,7 @@ Key environment variables:
 - `JWT_ISSUER`: expected issuer, default `zaraamad-django`
 - `JWT_AUDIENCE`: optional audience claim to verify when set
 - `BRIDGE_API_KEY`: shared secret used for bridge-authenticated API access
+- `CUSTOMER_CONNECTION_SECRET_KEY`: Fernet-compatible master key used to encrypt stored customer database connection strings
 - `SMS_PANEL_ORGANIZATION`: SMS panel organization
 - `SMS_PANEL_USERNAME`: SMS panel username
 - `SMS_PANEL_PASSWORD`: SMS panel password

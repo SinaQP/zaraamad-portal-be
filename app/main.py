@@ -55,6 +55,10 @@ OPENAPI_TAGS = [
         "description": "Customer bridge configuration, cached status, health, capability, and subscription endpoints.",
     },
     {
+        "name": "customer-database-connections",
+        "description": "Encrypted customer database connection configuration and live test endpoints.",
+    },
+    {
         "name": "service-projects",
         "description": "Service project setup and project hierarchy endpoints.",
     },

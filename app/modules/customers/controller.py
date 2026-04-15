@@ -11,6 +11,8 @@ from app.modules.customers.dtos import (
     CustomerBridgeConfigOut,
     CustomerBridgeConfigUpdate,
     CustomerBridgeHealthOut,
+    CustomerDatabaseConnectionOut,
+    CustomerDatabaseConnectionUpdate,
     CustomerIncomeBulkUpsertCreate,
     CustomerIncomeDetailOut,
     CustomerIncomeListOut,
@@ -24,10 +26,12 @@ from app.modules.customers.mappers import CustomerMapper, get_customer_mapper
 from app.modules.customers.service import (
     CustomerBridgeService,
     CustomerBridgeConfigService,
+    CustomerDatabaseConnectionService,
     CustomerIncomeService,
     CustomerService,
     get_customer_bridge_service,
     get_customer_bridge_config_service,
+    get_customer_database_connection_service,
     get_customer_income_service,
     get_customer_service,
 )
@@ -46,6 +50,7 @@ from app.modules.subscriptions.mappers import (
 
 CUSTOMERS_TAG = "customers"
 CUSTOMER_BRIDGE_TAG = "customer-bridge"
+CUSTOMER_DATABASE_CONNECTION_TAG = "customer-database-connections"
 
 router = APIRouter(prefix="/customers")
 
@@ -348,6 +353,103 @@ def deactivate_customer(
 ) -> CustomerOut:
     customer = service.deactivate(customer_id=customer_id)
     return mapper.to_out(customer=customer)
+
+
+@router.get(
+    "/{customer_id}/database-connection",
+    tags=[CUSTOMER_DATABASE_CONNECTION_TAG],
+    response_model=CustomerDatabaseConnectionOut,
+    summary="Get customer database connection config",
+    description="Return the non-sensitive view of the encrypted customer database connection configuration.",
+    responses={
+        200: {"description": "Customer database connection configuration returned."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer or connection configuration not found."},
+    },
+)
+def get_customer_database_connection(
+    customer_id: int,
+    _: object = Depends(require_admin),
+    service: CustomerDatabaseConnectionService = Depends(get_customer_database_connection_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerDatabaseConnectionOut:
+    customer, database_connection = service.get_active(customer_id=customer_id)
+    result = mapper.to_database_connection_out(
+        customer=customer,
+        database_connection=database_connection,
+    )
+    if result is None:
+        raise RuntimeError("Customer database connection mapper returned no result.")
+    return result
+
+
+@router.patch(
+    "/{customer_id}/database-connection",
+    tags=[CUSTOMER_DATABASE_CONNECTION_TAG],
+    response_model=CustomerDatabaseConnectionOut,
+    summary="Update customer database connection config",
+    description="Create or partially update an encrypted customer database connection configuration without returning the stored secret.",
+    responses={
+        200: {"description": "Customer database connection configuration updated."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer not found."},
+        409: {"description": "Stored customer database connection configuration is incomplete."},
+        422: {"description": "Provided connection string is invalid."},
+        503: {"description": "Secret encryption is not configured."},
+    },
+)
+def update_customer_database_connection(
+    customer_id: int,
+    payload: CustomerDatabaseConnectionUpdate,
+    _: object = Depends(require_admin),
+    service: CustomerDatabaseConnectionService = Depends(get_customer_database_connection_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerDatabaseConnectionOut:
+    customer, database_connection = service.upsert(
+        customer_id=customer_id,
+        dto=payload,
+    )
+    result = mapper.to_database_connection_out(
+        customer=customer,
+        database_connection=database_connection,
+    )
+    if result is None:
+        raise RuntimeError("Customer database connection mapper returned no result.")
+    return result
+
+
+@router.post(
+    "/{customer_id}/database-connection/test",
+    tags=[CUSTOMER_DATABASE_CONNECTION_TAG],
+    response_model=CustomerDatabaseConnectionOut,
+    summary="Test customer database connection",
+    description="Decrypt the stored customer database connection string, run a live SQL Server connectivity check, cache the sanitized result, and return the non-sensitive status view.",
+    responses={
+        200: {"description": "Customer database connection test succeeded."},
+        403: {"description": "Admin access required."},
+        404: {"description": "Customer or connection configuration not found."},
+        409: {"description": "Stored customer database connection configuration is incomplete."},
+        422: {"description": "Provided connection string is invalid."},
+        502: {"description": "Customer database connection test failed."},
+        503: {"description": "Secret encryption is not configured."},
+    },
+)
+def test_customer_database_connection(
+    customer_id: int,
+    _: object = Depends(require_admin),
+    service: CustomerDatabaseConnectionService = Depends(get_customer_database_connection_service),
+    mapper: CustomerMapper = Depends(get_customer_mapper),
+) -> CustomerDatabaseConnectionOut:
+    customer, database_connection = service.test_connection(
+        customer_id=customer_id,
+    )
+    result = mapper.to_database_connection_out(
+        customer=customer,
+        database_connection=database_connection,
+    )
+    if result is None:
+        raise RuntimeError("Customer database connection mapper returned no result.")
+    return result
 
 
 @router.get(

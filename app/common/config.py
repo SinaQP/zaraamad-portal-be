@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     sms_request_timeout_seconds: int = 15
     bridge_request_timeout_seconds: int = 10
     bridge_api_key: str = "change-me-bridge-key"
+    customer_connection_secret_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "CUSTOMER_CONNECTION_SECRET_KEY",
+            "DATABASE_CONNECTION_SECRET_KEY",
+        ),
+    )
     sms_panel_organization: str | None = Field(
         default=None,
         validation_alias=AliasChoices("SMS_PANEL_ORGANIZATION", "API_ORGANIZATION"),
@@ -85,6 +92,7 @@ class Settings(BaseSettings):
                 if isinstance(origin, str) and origin.strip()
             ]
         return value
+
 
 @lru_cache
 def get_settings() -> Settings:

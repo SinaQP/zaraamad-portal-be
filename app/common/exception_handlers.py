@@ -102,6 +102,14 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.SUBSCRIPTION_CONFIG_UPDATE_REQUIRED: "The request body did not include subscription or messages.",
     messages.INVALID_JALALI_DATE: "A Jalali date field did not match YYYY-MM-DD.",
     messages.INVALID_JALALI_DATETIME: "A Jalali datetime field did not match YYYY-MM-DD HH:MM:SS.",
+    messages.CUSTOMER_DATABASE_CONNECTION_NOT_FOUND: "Customer database connection is not configured.",
+    messages.CUSTOMER_DATABASE_CONNECTION_INCOMPLETE: "Customer database connection record is incomplete.",
+    messages.CUSTOMER_DATABASE_PASSWORD_REQUIRED: "Customer database password value was missing.",
+    messages.CUSTOMER_DATABASE_CONNECTION_SECRET_NOT_CONFIGURED: (
+        "Application-level customer database secret encryption is not configured."
+    ),
+    messages.CUSTOMER_DATABASE_CONNECTION_STRING_INVALID: "Customer database connection string is invalid.",
+    messages.CUSTOMER_DATABASE_CONNECTION_TEST_FAILED: "Customer database connection test failed.",
     messages.ROUTE_NOT_FOUND: "Route not found.",
     messages.METHOD_NOT_ALLOWED: "HTTP method is not allowed for this route.",
 }

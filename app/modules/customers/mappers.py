@@ -65,15 +65,11 @@ class CustomerMapper:
             customer_id=customer.id,
             customer_name=customer.name,
             db_kind=database_connection.db_kind,
-            host=database_connection.host,
-            port=database_connection.port,
-            database_name=database_connection.database_name,
-            username=database_connection.username,
-            driver_name=database_connection.driver_name,
-            encrypt_connection=database_connection.encrypt_connection,
-            trust_server_certificate=database_connection.trust_server_certificate,
             is_active=database_connection.is_active,
-            has_secret_ref=bool(database_connection.secret_ref),
+            has_connection_secret=bool(
+                database_connection.encrypted_connection_string
+                or database_connection.secret_ref
+            ),
             secret_version=database_connection.secret_version,
             credential_rotated_at=database_connection.credential_rotated_at,
             rotation_due_at=database_connection.rotation_due_at,

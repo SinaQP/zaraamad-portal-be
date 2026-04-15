@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.database import Base, TimestampMixin
@@ -51,13 +51,15 @@ class CustomerDatabaseConnection(Base, TimestampMixin):
         primary_key=True,
     )
     db_kind: Mapped[str] = mapped_column(String(50), nullable=False, default="sqlserver", server_default="sqlserver")
-    host: Mapped[str] = mapped_column(String(255), nullable=False)
-    port: Mapped[int] = mapped_column(Integer, nullable=False, default=1433, server_default="1433")
-    database_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    username: Mapped[str] = mapped_column(String(255), nullable=False)
-    secret_ref: Mapped[str] = mapped_column(String(500), nullable=False)
+    host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    port: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1433, server_default="1433")
+    database_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    secret_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
     secret_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
     driver_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    encrypted_connection_string: Mapped[str | None] = mapped_column(Text, nullable=True)
+    connection_string_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     encrypt_connection: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

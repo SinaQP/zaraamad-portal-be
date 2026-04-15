@@ -33,12 +33,8 @@ class CustomerBridgeConfigNormalizer(MongoDTO):
 
 class CustomerDatabaseConnectionNormalizer(MongoDTO):
     @field_validator(
-        "host",
-        "database_name",
-        "username",
-        "secret_ref",
+        "connection_string",
         "secret_version",
-        "driver_name",
         check_fields=False,
     )
     @classmethod
@@ -308,70 +304,30 @@ class CustomerBridgeConfigOut(MongoDTO):
 
 
 class CustomerDatabaseConnectionBase(CustomerDatabaseConnectionNormalizer):
-    db_kind: str = Field(
-        default="sqlserver",
-        description="Database engine kind for the customer connection.",
-        examples=["sqlserver"],
-    )
-    host: str = Field(
+    connection_string: str = Field(
         ...,
-        description="Database server host or IP.",
-        examples=["10.10.10.20"],
-    )
-    port: int = Field(
-        default=1433,
-        ge=1,
-        le=65535,
-        description="Database server port.",
-        examples=[1433],
-    )
-    database_name: str = Field(
-        ...,
-        description="Target database name.",
-        examples=["CustomerPortalDb"],
-    )
-    username: str = Field(
-        ...,
-        description="Database login username.",
-        examples=["portal_reader"],
-    )
-    secret_ref: str = Field(
-        ...,
-        description="Secret manager reference for the database password.",
-        examples=["kv/zaraamad/customers/1/sqlserver-password"],
+        description="Full SQLAlchemy SQL Server connection string. This value is stored encrypted and is never returned by the API.",
+        examples=[
+            "mssql+pyodbc://portal_user:secret@10.10.10.20:1433/CustomerPortalDb?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no"
+        ],
     )
     secret_version: str | None = Field(
         default=None,
-        description="Optional secret version or label used during credential rotation.",
+        description="Optional secret version or rotation label for the encrypted connection secret.",
         examples=["v3"],
-    )
-    driver_name: str | None = Field(
-        default=None,
-        description="Optional SQL Server ODBC driver name override.",
-        examples=["ODBC Driver 18 for SQL Server"],
-    )
-    encrypt_connection: bool = Field(
-        default=True,
-        description="Whether transport encryption must be enabled for the database connection.",
-        examples=[True],
-    )
-    trust_server_certificate: bool = Field(
-        default=False,
-        description="Whether the SQL Server certificate may be trusted without full validation.",
-        examples=[False],
     )
     is_active: bool = Field(
         default=True,
-        description="Whether this customer database connection may be used.",
+        description="Whether this encrypted customer database connection may be used.",
         examples=[True],
     )
     credential_rotated_at: datetime | None = Field(
         default=None,
-        description="Last successful credential rotation timestamp.",
+        description="Last successful encrypted connection rotation timestamp.",
     )
     rotation_due_at: datetime | None = Field(
         default=None,
-        description="Planned next credential rotation timestamp.",
+        description="Planned next encrypted connection rotation timestamp.",
     )
 
 
@@ -380,43 +336,25 @@ class CustomerDatabaseConnectionCreate(CustomerDatabaseConnectionBase):
 
 
 class CustomerDatabaseConnectionUpdate(CustomerDatabaseConnectionNormalizer):
-    db_kind: str | None = Field(default=None, description="Database engine kind for the customer connection.", examples=["sqlserver"])
-    host: str | None = Field(default=None, description="Database server host or IP.", examples=["10.10.10.20"])
-    port: int | None = Field(default=None, ge=1, le=65535, description="Database server port.", examples=[1433])
-    database_name: str | None = Field(default=None, description="Target database name.", examples=["CustomerPortalDb"])
-    username: str | None = Field(default=None, description="Database login username.", examples=["portal_reader"])
-    secret_ref: str | None = Field(
+    connection_string: str | None = Field(
         default=None,
-        description="Secret manager reference for the database password.",
-        examples=["kv/zaraamad/customers/1/sqlserver-password"],
+        description="Full SQLAlchemy SQL Server connection string. This value is stored encrypted and is never returned by the API.",
+        examples=[
+            "mssql+pyodbc://portal_user:secret@10.10.10.20:1433/CustomerPortalDb?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no"
+        ],
     )
     secret_version: str | None = Field(
         default=None,
-        description="Optional secret version or label used during credential rotation.",
+        description="Optional secret version or rotation label for the encrypted connection secret.",
         examples=["v3"],
-    )
-    driver_name: str | None = Field(
-        default=None,
-        description="Optional SQL Server ODBC driver name override.",
-        examples=["ODBC Driver 18 for SQL Server"],
-    )
-    encrypt_connection: bool | None = Field(
-        default=None,
-        description="Whether transport encryption must be enabled for the database connection.",
-        examples=[True],
-    )
-    trust_server_certificate: bool | None = Field(
-        default=None,
-        description="Whether the SQL Server certificate may be trusted without full validation.",
-        examples=[False],
     )
     is_active: bool | None = Field(
         default=None,
-        description="Whether this customer database connection may be used.",
+        description="Whether this encrypted customer database connection may be used.",
         examples=[True],
     )
-    credential_rotated_at: datetime | None = Field(default=None, description="Last successful credential rotation timestamp.")
-    rotation_due_at: datetime | None = Field(default=None, description="Planned next credential rotation timestamp.")
+    credential_rotated_at: datetime | None = Field(default=None, description="Last successful encrypted connection rotation timestamp.")
+    rotation_due_at: datetime | None = Field(default=None, description="Planned next encrypted connection rotation timestamp.")
 
     @model_validator(mode="after")
     def validate_has_updates(self) -> Self:
@@ -429,18 +367,11 @@ class CustomerDatabaseConnectionOut(MongoDTO):
     customer_id: int = Field(..., description="Customer id.", examples=[1])
     customer_name: str = Field(..., description="Customer name.", examples=["Tehran Customer"])
     db_kind: str = Field(..., description="Database engine kind.", examples=["sqlserver"])
-    host: str = Field(..., description="Database server host or IP.", examples=["10.10.10.20"])
-    port: int = Field(..., description="Database server port.", examples=[1433])
-    database_name: str = Field(..., description="Target database name.", examples=["CustomerPortalDb"])
-    username: str = Field(..., description="Database login username.", examples=["portal_reader"])
-    driver_name: str | None = Field(default=None, description="Optional SQL Server ODBC driver name override.", examples=["ODBC Driver 18 for SQL Server"])
-    encrypt_connection: bool = Field(..., description="Whether transport encryption is enabled for the database connection.", examples=[True])
-    trust_server_certificate: bool = Field(..., description="Whether the SQL Server certificate is trusted without full validation.", examples=[False])
     is_active: bool = Field(..., description="Whether this customer database connection may be used.", examples=[True])
-    has_secret_ref: bool = Field(..., description="Whether a secret manager reference is registered for the password.", examples=[True])
-    secret_version: str | None = Field(default=None, description="Optional secret version or label used during credential rotation.", examples=["v3"])
-    credential_rotated_at: datetime | None = Field(default=None, description="Last successful credential rotation timestamp.")
-    rotation_due_at: datetime | None = Field(default=None, description="Planned next credential rotation timestamp.")
+    has_connection_secret: bool = Field(..., description="Whether an encrypted connection string is registered for this customer.", examples=[True])
+    secret_version: str | None = Field(default=None, description="Optional secret version or rotation label for the encrypted connection secret.", examples=["v3"])
+    credential_rotated_at: datetime | None = Field(default=None, description="Last successful encrypted connection rotation timestamp.")
+    rotation_due_at: datetime | None = Field(default=None, description="Planned next encrypted connection rotation timestamp.")
     last_connection_tested_at: datetime | None = Field(default=None, description="Last connection test timestamp.")
     last_connection_test_success: bool | None = Field(default=None, description="Whether the last connection test succeeded.", examples=[True])
     last_connection_error: str | None = Field(default=None, description="Sanitized error message from the last connection test.")

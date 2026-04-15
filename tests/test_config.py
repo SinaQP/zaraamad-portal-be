@@ -43,7 +43,17 @@ def test_get_settings_keeps_default_database_url(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("SQLSERVER_URL", raising=False)
     monkeypatch.delenv("CENTRAL_DATABASE_URL", raising=False)
+    monkeypatch.delenv("CUSTOMER_CONNECTION_SECRET_KEY", raising=False)
 
     settings = Settings(_env_file=None)
 
     assert settings.database_url == DEFAULT_DATABASE_URL
+
+
+def test_get_settings_reads_customer_connection_secret_key() -> None:
+    settings = Settings(
+        _env_file=None,
+        CUSTOMER_CONNECTION_SECRET_KEY="-E_R1oAEBykFnlBgP-BSJ6MG_XvG3ytPIe7bU2MOzyU=",
+    )
+
+    assert settings.customer_connection_secret_key == "-E_R1oAEBykFnlBgP-BSJ6MG_XvG3ytPIe7bU2MOzyU="

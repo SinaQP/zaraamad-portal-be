@@ -35,6 +35,10 @@ def configure_test_settings(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("JWT_SIGNING_KEY", "test-signing-key")
     monkeypatch.setenv("JWT_ALGORITHM", "HS256")
     monkeypatch.setenv("JWT_ISSUER", "zaraamad-django")
+    monkeypatch.setenv(
+        "CUSTOMER_CONNECTION_SECRET_KEY",
+        "-E_R1oAEBykFnlBgP-BSJ6MG_XvG3ytPIe7bU2MOzyU=",
+    )
     monkeypatch.delenv("JWT_AUDIENCE", raising=False)
     get_settings.cache_clear()
     yield
