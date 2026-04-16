@@ -19,6 +19,7 @@ from app.modules.feedback.module import router as feedback_router
 from app.modules.forms.module import router as forms_router
 from app.modules.health.module import router as health_router
 from app.modules.service_catalog.module import router as service_catalog_router
+from app.modules.tickets.module import router as ticket_router
 from app.modules.users.module import router as user_router
 
 OPENAPI_TAGS = [
@@ -90,6 +91,10 @@ OPENAPI_TAGS = [
         "name": "customer-pricing",
         "description": "Customer pricing summary endpoints.",
     },
+    {
+        "name": "tickets",
+        "description": "Ticket creation, assignment, and lifecycle management endpoints.",
+    },
 ]
 
 
@@ -123,6 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(forms_router)
     app.include_router(customer_router)
     app.include_router(service_catalog_router)
+    app.include_router(ticket_router)
     return app
 
 

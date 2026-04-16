@@ -2,7 +2,7 @@
 
 Backend API for Zaraamad Portal Phase 1.
 
-Current release: `1.4.0`
+Current release: `1.5.0`
 
 ## Overview
 
@@ -17,6 +17,7 @@ This backend currently provides:
 - Customer-specific service pricing and pricing summary
 - Customer service purchase selection with stored totals
 - Customer bridge health, capability, cached subscription lookup, and remote subscription management
+- Ticketing with status workflow, assignment, and ownership-aware access rules
 - Standardized API error responses
 - Search, sorting, pagination, and soft deactivation
 
@@ -315,6 +316,16 @@ Customer service purchases:
 - `GET /customer-service-purchases/{purchase_id}`
 - `PATCH /customer-service-purchases/{purchase_id}`
 - `DELETE /customer-service-purchases/{purchase_id}`
+
+Tickets:
+
+- `POST /tickets`
+- `GET /tickets`
+- `GET /tickets/{ticket_id}`
+- `PATCH /tickets/{ticket_id}`
+- `PATCH /tickets/{ticket_id}/status`
+- `PATCH /tickets/{ticket_id}/assign`
+- `DELETE /tickets/{ticket_id}`
 
 Forms:
 

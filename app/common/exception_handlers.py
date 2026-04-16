@@ -85,6 +85,10 @@ _HTTP_EXCEPTION_DEVELOPER_MESSAGES = {
     messages.CUSTOMER_SERVICE_SELECTION_SNAPSHOT_NOT_FOUND: (
         "Requested customer service selection snapshot record was not found."
     ),
+    messages.TICKET_NOT_FOUND: "Requested ticket record was not found.",
+    messages.TICKET_ACCESS_DENIED: "Authenticated user cannot access the requested ticket scope.",
+    messages.TICKET_INVALID_STATUS_TRANSITION: "Ticket status transition is not allowed.",
+    messages.TICKET_ASSIGNEE_INVALID: "The supplied assignee user is invalid or inactive.",
     messages.CUSTOMER_SERVICE_CONFIG_SELECTION_INVALID: (
         "At least one selected customer_service_config_id was invalid for this customer."
     ),
