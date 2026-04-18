@@ -21,18 +21,45 @@ Notes:
 
 - In the current schema, `bridge_id` in the token is the bridge row identifier (`customer_id`).
 - Existing Bridge records are reused as-is; no Bridge schema redesign was introduced.
+- No Bridge migration/backfill is required in this phase because routing still uses existing `bridge_base_url` data.
 
 ## Portal-Issued JWT (Phase 1)
 
 Portal creates a minimal RS256 token with:
 
-- `iss = zaravand-portal` (configurable by `PORTAL_BRIDGE_JWT_ISSUER`)
+- `iss = zaravand-portal` (configurable by `JWT_ISSUER`)
 - `sub = user:<portal_user_id>`
 - `bridge_id = <customer_id>`
 - `customer_id = <customer_id>` (optional helper claim)
 - `iat`
-- `exp` (short TTL via `PORTAL_BRIDGE_JWT_TTL_SECONDS`)
+- `exp` (short TTL via `JWT_TTL_SECONDS`, default `120`)
 - `jti`
+
+Portal signer config for this phase:
+
+- `JWT_PRIVATE_KEY` (required, fail-fast at request time if missing)
+- `JWT_ISSUER` (default `zaravand-portal`)
+- `JWT_TTL_SECONDS` (default `120`)
+
+## Manual Setup (Local/Dev)
+
+1. Configure Portal `.env`:
+`JWT_PRIVATE_KEY=<RSA private key PEM>`
+`JWT_ISSUER=zaravand-portal`
+`JWT_TTL_SECONDS=120`
+2. Confirm Bridge routing row exists in `customer_bridge_configs` for the selected customer:
+`bridge_is_enabled=true`
+`bridge_base_url=<zaraamad internal base URL>`
+3. Configure Zaraamad verifier with the matching Portal public key and issuer.
+4. Call Portal endpoint: `GET /customers/{customer_id}/bridge/pilot/ping`.
+5. Frontend must call only Portal; frontend must not call Zaraamad directly.
+
+## Error Mapping
+
+- `403`: Portal user is authenticated but not allowed to access selected customer.
+- `404`: Customer or Bridge target for the requested customer cannot be resolved.
+- `502`: Zaraamad upstream rejected the request or returned an invalid/non-JSON payload.
+- `504`: Zaraamad upstream timed out.
 
 ## What Belongs in Bridge (Now)
 

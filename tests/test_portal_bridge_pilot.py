@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 import app.modules.customers.portal_bridge_pilot_service as pilot_service_module
 from app.common.config import get_settings
 from app.common.enums import UserRole
-from app.common.messages import CUSTOMER_ACCESS_DENIED
+from app.common.messages import (
+    CUSTOMER_ACCESS_DENIED,
+    CUSTOMER_BRIDGE_NOT_CONFIGURED,
+    CUSTOMER_BRIDGE_REQUEST_FAILED,
+    CUSTOMER_BRIDGE_UNAVAILABLE,
+)
 from app.modules.customers.schemas import Customer, CustomerBridgeConfig
 from app.modules.users.schemas import User
 from tests.auth_utils import auth_headers_for_user
@@ -81,11 +86,11 @@ def test_customer_bridge_pilot_proxy_uses_bridge_base_url_and_minimal_portal_cla
     monkeypatch,
 ) -> None:
     monkeypatch.setenv(
-        "PORTAL_BRIDGE_JWT_PRIVATE_KEY",
+        "JWT_PRIVATE_KEY",
         "-----BEGIN PRIVATE KEY-----\\nmock-key\\n-----END PRIVATE KEY-----",
     )
-    monkeypatch.setenv("PORTAL_BRIDGE_JWT_ISSUER", "zaravand-portal")
-    monkeypatch.setenv("PORTAL_BRIDGE_JWT_TTL_SECONDS", "120")
+    monkeypatch.setenv("JWT_ISSUER", "zaravand-portal")
+    monkeypatch.setenv("JWT_TTL_SECONDS", "120")
     get_settings.cache_clear()
 
     customer = _create_customer(db_session=db_session, name="Pilot Customer")
@@ -162,7 +167,14 @@ def test_customer_bridge_pilot_proxy_uses_bridge_base_url_and_minimal_portal_cla
 def test_customer_bridge_pilot_proxy_enforces_customer_scope(
     client: TestClient,
     db_session: Session,
+    monkeypatch,
 ) -> None:
+    monkeypatch.setenv(
+        "JWT_PRIVATE_KEY",
+        "-----BEGIN PRIVATE KEY-----\\nmock-key\\n-----END PRIVATE KEY-----",
+    )
+    get_settings.cache_clear()
+
     customer_one = _create_customer(db_session=db_session, name="Customer One")
     customer_two = _create_customer(db_session=db_session, name="Customer Two")
     _create_bridge_config(
@@ -183,3 +195,108 @@ def test_customer_bridge_pilot_proxy_enforces_customer_scope(
 
     assert response.status_code == 403
     assert response.json()["message"] == CUSTOMER_ACCESS_DENIED
+    get_settings.cache_clear()
+
+
+def test_customer_bridge_pilot_proxy_returns_not_found_when_bridge_target_missing(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "JWT_PRIVATE_KEY",
+        "-----BEGIN PRIVATE KEY-----\\nmock-key\\n-----END PRIVATE KEY-----",
+    )
+    get_settings.cache_clear()
+
+    customer = _create_customer(db_session=db_session, name="No Bridge Customer")
+    user = _create_customer_user(
+        db_session=db_session,
+        customer_id=customer.id,
+        mobile="09126667790",
+    )
+
+    response = client.get(
+        f"/customers/{customer.id}/bridge/pilot/ping",
+        headers=auth_headers_for_user(user),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["message"] == CUSTOMER_BRIDGE_NOT_CONFIGURED
+    get_settings.cache_clear()
+
+
+def test_customer_bridge_pilot_proxy_fails_fast_when_private_key_missing(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("JWT_PRIVATE_KEY", raising=False)
+    get_settings.cache_clear()
+
+    customer = _create_customer(db_session=db_session, name="Missing Key Customer")
+    _create_bridge_config(
+        db_session=db_session,
+        customer_id=customer.id,
+        base_url="https://customer-key.internal",
+    )
+    user = _create_customer_user(
+        db_session=db_session,
+        customer_id=customer.id,
+        mobile="09126667791",
+    )
+
+    response = client.get(
+        f"/customers/{customer.id}/bridge/pilot/ping",
+        headers=auth_headers_for_user(user),
+    )
+
+    assert response.status_code == 503
+    assert response.json()["message"] == CUSTOMER_BRIDGE_REQUEST_FAILED
+    assert "JWT_PRIVATE_KEY" in response.json()["developer_message"]
+    get_settings.cache_clear()
+
+
+def test_customer_bridge_pilot_proxy_maps_timeout_to_gateway_timeout(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "JWT_PRIVATE_KEY",
+        "-----BEGIN PRIVATE KEY-----\\nmock-key\\n-----END PRIVATE KEY-----",
+    )
+    get_settings.cache_clear()
+
+    customer = _create_customer(db_session=db_session, name="Timeout Customer")
+    _create_bridge_config(
+        db_session=db_session,
+        customer_id=customer.id,
+        base_url="https://timeout.internal",
+    )
+    user = _create_customer_user(
+        db_session=db_session,
+        customer_id=customer.id,
+        mobile="09126667792",
+    )
+
+    monkeypatch.setattr(
+        pilot_service_module.jwt,
+        "encode",
+        lambda payload, key, algorithm: "signed-timeout-token",
+    )
+
+    def fake_timeout_urlopen(request, timeout):  # noqa: ANN001
+        del request, timeout
+        raise TimeoutError("upstream timed out")
+
+    monkeypatch.setattr(pilot_service_module, "urlopen", fake_timeout_urlopen)
+
+    response = client.get(
+        f"/customers/{customer.id}/bridge/pilot/ping",
+        headers=auth_headers_for_user(user),
+    )
+
+    assert response.status_code == 504
+    assert response.json()["message"] == CUSTOMER_BRIDGE_UNAVAILABLE
+    get_settings.cache_clear()

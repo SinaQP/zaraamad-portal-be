@@ -116,14 +116,13 @@ Key environment variables:
 - `APP_ENV`: environment label such as `development`
 - `DATABASE_URL`: database connection string
 - `FORM_SERVICE_DEBUG`: toggle extra form-service diagnostics when needed
-- `JWT_SIGNING_KEY`: shared HS256 signing key used by Django and FastAPI
+- `JWT_SIGNING_KEY`: HS256 signing key used for Portal user access tokens
 - `JWT_ALGORITHM`: JWT signing algorithm, default `HS256`
-- `JWT_ISSUER`: expected issuer, default `zaraamad-django`
+- `JWT_ISSUER`: Portal JWT issuer for both Portal user tokens and Portal -> Zaraamad JWTs, default `zaravand-portal`
+- `JWT_PRIVATE_KEY`: RS256 private key used only for Portal -> Zaraamad backend JWT signing
+- `JWT_TTL_SECONDS`: short TTL for Portal -> Zaraamad JWT, default `120`
 - `JWT_AUDIENCE`: optional audience claim to verify when set
 - `BRIDGE_API_KEY`: shared secret used for bridge-authenticated API access
-- `PORTAL_BRIDGE_JWT_PRIVATE_KEY`: RS256 private key used only for Portal -> Zaraamad backend JWT signing
-- `PORTAL_BRIDGE_JWT_ISSUER`: issuer claim for Portal -> Zaraamad JWT, default `zaravand-portal`
-- `PORTAL_BRIDGE_JWT_TTL_SECONDS`: short TTL for Portal -> Zaraamad JWT, default `120`
 - `CUSTOMER_CONNECTION_SECRET_KEY`: Fernet-compatible master key used to encrypt stored customer database connection strings
 - `SMS_PANEL_ORGANIZATION`: SMS panel organization
 - `SMS_PANEL_USERNAME`: SMS panel username
@@ -176,7 +175,7 @@ It only verifies the bearer access token issued by the Django system:
 - Header: `Authorization: Bearer <token>`
 - Algorithm: `HS256`
 - Key: `JWT_SIGNING_KEY`
-- Issuer: `JWT_ISSUER` and defaults to `zaraamad-django`
+- Issuer: `JWT_ISSUER` and defaults to `zaravand-portal`
 - Audience: verified only when `JWT_AUDIENCE` is configured
 
 Expected access-token claims:
@@ -203,7 +202,7 @@ Example response:
   "security_stamp": "stamp-123",
   "raw_claims": {
     "token_type": "access",
-    "iss": "zaraamad-django"
+    "iss": "zaravand-portal"
   }
 }
 ```
@@ -361,6 +360,16 @@ The minimal backend-to-backend pilot flow for this phase is documented in:
 - `docs/portal_zaraamad_minimal_auth_phase1.md`
 
 This pilot intentionally avoids instance-registry redesign and only uses existing Bridge data for routing (`customer_id` + `bridge_base_url` + enabled status).
+
+Manual setup required for local/dev:
+
+1. Set `JWT_PRIVATE_KEY` in `.env` to a valid RSA private key PEM (newline format can be real newlines or `\n` escaped).
+2. Set `JWT_ISSUER=zaravand-portal` unless your Zaraamad verifier is configured for another issuer.
+3. Set `JWT_TTL_SECONDS=120` (short-lived by design; 120 seconds is used in this codebase to reduce clock-skew failures in local/dev while staying short-lived).
+4. Ensure the target customer row in `customer_bridge_configs` has:
+`bridge_is_enabled=true`
+`bridge_base_url=<zaraamad-internal-base-url>`
+5. Call `GET /customers/{customer_id}/bridge/pilot/ping` from frontend through Portal only.
 
 ### Resolution
 

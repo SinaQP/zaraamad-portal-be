@@ -495,9 +495,10 @@ def get_customer_bridge_config(
         200: {"description": "Pilot Zaraamad response returned."},
         401: {"description": "Authentication required."},
         403: {"description": "Customer access denied."},
-        409: {"description": "Customer bridge routing config is incomplete."},
+        404: {"description": "Customer or bridge target not found."},
         502: {"description": "Zaraamad rejected the request or returned an invalid response."},
-        503: {"description": "Zaraamad is unreachable or Portal signing config is unavailable."},
+        503: {"description": "Portal signing configuration is unavailable."},
+        504: {"description": "Zaraamad request timed out."},
     },
 )
 def proxy_customer_bridge_pilot_ping(

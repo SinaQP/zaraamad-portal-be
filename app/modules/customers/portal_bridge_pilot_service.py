@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -26,6 +27,8 @@ from app.modules.customers.service import (
     CustomerScopedAccessPolicy,
     get_customer_bridge_config_service,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CustomerPortalBridgePilotService:
@@ -64,17 +67,41 @@ class CustomerPortalBridgePilotService:
             customer_id=customer.id,
             bridge_config=bridge_config,
         )
+        signing_private_key = self._require_signing_private_key()
         bridge_id = str(bridge_config.customer_id)
         portal_token = self._create_portal_bridge_token(
             portal_user_id=current_user.id,
             bridge_id=bridge_id,
             customer_id=customer.id,
+            signing_private_key=signing_private_key,
         )
-        return self._fetch_pilot_payload(
-            base_url=target_base_url,
+        target_endpoint_url = f"{target_base_url}{self._PILOT_ENDPOINT_PATH}"
+        logger.info(
+            "Portal Zaraamad pilot proxy started user_id=%s customer_id=%s bridge_id=%s target_url=%s correlation_id=%s",
+            current_user.id,
+            customer.id,
+            bridge_id,
+            target_endpoint_url,
+            correlation_id,
+        )
+        payload, upstream_status = self._fetch_pilot_payload(
             portal_token=portal_token,
             correlation_id=correlation_id,
+            user_id=current_user.id,
+            bridge_id=bridge_id,
+            customer_id=customer.id,
+            target_endpoint_url=target_endpoint_url,
         )
+        logger.info(
+            "Portal Zaraamad pilot proxy completed user_id=%s customer_id=%s bridge_id=%s target_url=%s correlation_id=%s upstream_status=%s",
+            current_user.id,
+            customer.id,
+            bridge_id,
+            target_endpoint_url,
+            correlation_id,
+            upstream_status,
+        )
+        return payload
 
     def _resolve_target_base_url(
         self,
@@ -92,7 +119,7 @@ class CustomerPortalBridgePilotService:
                 missing_fields.append("bridge_base_url")
         if missing_fields:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
+                status_code=status.HTTP_404_NOT_FOUND,
                 detail={
                     "message": CUSTOMER_BRIDGE_NOT_CONFIGURED,
                     "developer_message": (
@@ -103,40 +130,42 @@ class CustomerPortalBridgePilotService:
             )
         return bridge_config.bridge_base_url.rstrip("/")
 
-    def _create_portal_bridge_token(
-        self,
-        *,
-        portal_user_id: int,
-        bridge_id: str,
-        customer_id: int,
-    ) -> str:
-        private_key = (self._settings.portal_bridge_jwt_private_key or "").strip()
+    def _require_signing_private_key(self) -> str:
+        private_key = (self._settings.jwt_private_key or "").strip()
         if not private_key:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={
                     "message": CUSTOMER_BRIDGE_REQUEST_FAILED,
                     "developer_message": (
-                        "Portal bridge JWT private key is not configured. "
-                        "Set PORTAL_BRIDGE_JWT_PRIVATE_KEY."
+                        "Missing required JWT_PRIVATE_KEY configuration for Portal to Zaraamad signing."
                     ),
                 },
             )
+        return private_key.replace("\\n", "\n")
+
+    def _create_portal_bridge_token(
+        self,
+        *,
+        portal_user_id: int,
+        bridge_id: str,
+        customer_id: int,
+        signing_private_key: str,
+    ) -> str:
         now = datetime.now(UTC)
         payload: dict[str, Any] = {
-            "iss": self._settings.portal_bridge_jwt_issuer,
+            "iss": self._settings.jwt_issuer,
             "sub": f"user:{portal_user_id}",
             "bridge_id": bridge_id,
             "customer_id": str(customer_id),
             "iat": int(now.timestamp()),
-            "exp": int((now + timedelta(seconds=self._settings.portal_bridge_jwt_ttl_seconds)).timestamp()),
+            "exp": int((now + timedelta(seconds=self._settings.jwt_ttl_seconds)).timestamp()),
             "jti": str(uuid4()),
         }
-        normalized_private_key = private_key.replace("\\n", "\n")
         try:
             return jwt.encode(
                 payload,
-                normalized_private_key,
+                signing_private_key,
                 algorithm=self._PORTAL_BRIDGE_ALGORITHM,
             )
         except Exception as exc:
@@ -146,7 +175,7 @@ class CustomerPortalBridgePilotService:
                     "message": CUSTOMER_BRIDGE_REQUEST_FAILED,
                     "developer_message": (
                         "Portal bridge JWT signing failed. "
-                        f"Verify RS256 private key format. Error: {exc}"
+                        f"Verify JWT_PRIVATE_KEY RS256 private key format. Error: {exc}"
                     ),
                 },
             ) from exc
@@ -154,11 +183,15 @@ class CustomerPortalBridgePilotService:
     def _fetch_pilot_payload(
         self,
         *,
-        base_url: str,
         portal_token: str,
         correlation_id: str | None,
-    ) -> dict[str, Any]:
-        endpoint_url = f"{base_url}{self._PILOT_ENDPOINT_PATH}"
+        user_id: int,
+        bridge_id: str,
+        customer_id: int,
+        target_endpoint_url: str,
+    ) -> tuple[dict[str, Any], int]:
+        endpoint_url = target_endpoint_url
+        upstream_status = status.HTTP_200_OK
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {portal_token}",
@@ -173,9 +206,40 @@ class CustomerPortalBridgePilotService:
         try:
             with urlopen(request, timeout=self._settings.bridge_request_timeout_seconds) as response:
                 raw_response = self._decode_body(response.read())
+                upstream_status = int(getattr(response, "status", status.HTTP_200_OK))
+        except TimeoutError as exc:
+            logger.warning(
+                "Portal Zaraamad pilot proxy timeout user_id=%s customer_id=%s bridge_id=%s target_url=%s correlation_id=%s upstream_status=%s error=%s",
+                user_id,
+                customer_id,
+                bridge_id,
+                endpoint_url,
+                correlation_id,
+                status.HTTP_504_GATEWAY_TIMEOUT,
+                exc,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail={
+                    "message": CUSTOMER_BRIDGE_UNAVAILABLE,
+                    "developer_message": (
+                        "Portal timed out waiting for Zaraamad pilot endpoint "
+                        f"{endpoint_url}: {exc}"
+                    ),
+                },
+            ) from exc
         except HTTPError as exc:
             response_body = self._decode_body(exc.read())
             if exc.code in {401, 403}:
+                logger.warning(
+                    "Portal Zaraamad pilot proxy auth failure user_id=%s customer_id=%s bridge_id=%s target_url=%s correlation_id=%s upstream_status=%s",
+                    user_id,
+                    customer_id,
+                    bridge_id,
+                    endpoint_url,
+                    correlation_id,
+                    exc.code,
+                )
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail={
@@ -187,6 +251,15 @@ class CustomerPortalBridgePilotService:
                         ),
                     },
                 ) from exc
+            logger.warning(
+                "Portal Zaraamad pilot proxy upstream error user_id=%s customer_id=%s bridge_id=%s target_url=%s correlation_id=%s upstream_status=%s",
+                user_id,
+                customer_id,
+                bridge_id,
+                endpoint_url,
+                correlation_id,
+                exc.code,
+            )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={
@@ -195,12 +268,27 @@ class CustomerPortalBridgePilotService:
                         "Portal to Zaraamad pilot proxy failed at "
                         f"{endpoint_url} with status {exc.code}. Body: "
                         f"{self._compact_text(response_body)}"
-                    ),
-                },
-            ) from exc
-        except (TimeoutError, URLError, OSError) as exc:
+                        ),
+                    },
+                ) from exc
+        except (URLError, OSError) as exc:
+            upstream_status = (
+                status.HTTP_504_GATEWAY_TIMEOUT
+                if self._is_timeout_error(exc)
+                else status.HTTP_502_BAD_GATEWAY
+            )
+            logger.warning(
+                "Portal Zaraamad pilot proxy connection error user_id=%s customer_id=%s bridge_id=%s target_url=%s correlation_id=%s upstream_status=%s error=%s",
+                user_id,
+                customer_id,
+                bridge_id,
+                endpoint_url,
+                correlation_id,
+                upstream_status,
+                exc,
+            )
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                status_code=upstream_status,
                 detail={
                     "message": CUSTOMER_BRIDGE_UNAVAILABLE,
                     "developer_message": (
@@ -213,6 +301,15 @@ class CustomerPortalBridgePilotService:
         try:
             payload = json.loads(raw_response)
         except json.JSONDecodeError as exc:
+            logger.warning(
+                "Portal Zaraamad pilot proxy invalid JSON user_id=%s customer_id=%s bridge_id=%s target_url=%s correlation_id=%s upstream_status=%s",
+                user_id,
+                customer_id,
+                bridge_id,
+                endpoint_url,
+                correlation_id,
+                upstream_status,
+            )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={
@@ -225,6 +322,15 @@ class CustomerPortalBridgePilotService:
             ) from exc
 
         if not isinstance(payload, dict):
+            logger.warning(
+                "Portal Zaraamad pilot proxy non-object JSON user_id=%s customer_id=%s bridge_id=%s target_url=%s correlation_id=%s upstream_status=%s",
+                user_id,
+                customer_id,
+                bridge_id,
+                endpoint_url,
+                correlation_id,
+                upstream_status,
+            )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail={
@@ -235,7 +341,7 @@ class CustomerPortalBridgePilotService:
                     ),
                 },
             )
-        return payload
+        return payload, upstream_status
 
     def _decode_body(self, value: bytes | str) -> str:
         if isinstance(value, bytes):
@@ -247,6 +353,13 @@ class CustomerPortalBridgePilotService:
         if len(compact) <= max_length:
             return compact
         return f"{compact[:max_length]}..."
+
+    def _is_timeout_error(self, exc: Exception) -> bool:
+        if isinstance(exc, TimeoutError):
+            return True
+        if isinstance(exc, URLError):
+            return isinstance(exc.reason, TimeoutError) or "timed out" in str(exc.reason).lower()
+        return "timed out" in str(exc).lower()
 
 
 def get_customer_portal_bridge_pilot_service(
