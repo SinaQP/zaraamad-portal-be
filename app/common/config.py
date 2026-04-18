@@ -34,10 +34,10 @@ class Settings(BaseSettings):
     sms_api_url: str = "https://payamsms.com/services/rest/index.php"
     sms_request_timeout_seconds: int = 15
     bridge_request_timeout_seconds: int = 10
-    bridge_request_retry_count: int = 0
-    bridge_request_retry_backoff_seconds: float = 0.0
-    bridge_access_token_expire_seconds: int = 120
     bridge_api_key: str = "change-me-bridge-key"
+    portal_bridge_jwt_private_key: str | None = None
+    portal_bridge_jwt_issuer: str = "zaravand-portal"
+    portal_bridge_jwt_ttl_seconds: int = 120
     customer_connection_secret_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices(

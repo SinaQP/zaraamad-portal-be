@@ -120,11 +120,10 @@ Key environment variables:
 - `JWT_ALGORITHM`: JWT signing algorithm, default `HS256`
 - `JWT_ISSUER`: expected issuer, default `zaraamad-django`
 - `JWT_AUDIENCE`: optional audience claim to verify when set
-- `BRIDGE_REQUEST_TIMEOUT_SECONDS`: default timeout for Portal -> Zaraamad bridge requests
-- `BRIDGE_REQUEST_RETRY_COUNT`: retry count for transient Portal -> Zaraamad bridge errors
-- `BRIDGE_REQUEST_RETRY_BACKOFF_SECONDS`: retry backoff in seconds for Portal -> Zaraamad bridge errors
-- `BRIDGE_ACCESS_TOKEN_EXPIRE_SECONDS`: TTL for outbound Portal -> Zaraamad bridge JWTs
-- `BRIDGE_API_KEY`: shared secret used for inbound bridge-authenticated form schema access (`X-Bridge-Key`)
+- `BRIDGE_API_KEY`: shared secret used for bridge-authenticated API access
+- `PORTAL_BRIDGE_JWT_PRIVATE_KEY`: RS256 private key used only for Portal -> Zaraamad backend JWT signing
+- `PORTAL_BRIDGE_JWT_ISSUER`: issuer claim for Portal -> Zaraamad JWT, default `zaravand-portal`
+- `PORTAL_BRIDGE_JWT_TTL_SECONDS`: short TTL for Portal -> Zaraamad JWT, default `120`
 - `CUSTOMER_CONNECTION_SECRET_KEY`: Fernet-compatible master key used to encrypt stored customer database connection strings
 - `SMS_PANEL_ORGANIZATION`: SMS panel organization
 - `SMS_PANEL_USERNAME`: SMS panel username
@@ -272,10 +271,7 @@ Customer bridge:
 - `GET /customers/{customer_id}/bridge/subscriptions/config`
 - `PATCH /customers/{customer_id}/bridge/subscriptions/config`
 - `POST /customers/{customer_id}/bridge/subscriptions/refresh`
-
-Bridge instance registry design notes:
-
-- [`docs/bridge_instance_registry.md`](./docs/bridge_instance_registry.md)
+- `GET /customers/{customer_id}/bridge/pilot/ping`
 
 Users:
 
@@ -357,6 +353,14 @@ Form schema read endpoints require either:
 - `X-Bridge-Key: <shared-bridge-key>`
 
 Form management endpoints under `/api/admin` require an admin bearer token and do not accept bridge-only access.
+
+## Portal -> Zaraamad Pilot Auth
+
+The minimal backend-to-backend pilot flow for this phase is documented in:
+
+- `docs/portal_zaraamad_minimal_auth_phase1.md`
+
+This pilot intentionally avoids instance-registry redesign and only uses existing Bridge data for routing (`customer_id` + `bridge_base_url` + enabled status).
 
 ### Resolution
 
@@ -463,7 +467,7 @@ Pagination metadata is returned in response headers:
 - disabled or inactive customer service configs cannot be selected in a purchase
 - selected response timestamps are returned as Jalali datetime strings for `feedback.created_at`, `customers.updated_at`, and `customer-service-configs.updated_at`
 - customer service selection snapshot responses return Jalali `date` plus snapshot `time` in `HH:MM:SS` format
-- customer bridge subscription management resolves `base_url_internal`, `audience`, `tenant_id`, and `instance_id` from the requested Bridge row and sends an instance-scoped bearer token
+- customer bridge subscription management resolves the configured `bridge_base_url` and `bridge_api_key` from the requested customer
 - subscription bridge date fields use Jalali datetime strings in `YYYY-MM-DD HH:MM:SS` format
 
 Service catalog hierarchy:

@@ -1,6 +1,5 @@
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-from jose import jwt
 from sqlalchemy.orm import Session
 
 from app.common.enums import UserRole
@@ -366,34 +365,6 @@ def _admin_headers(client: TestClient, db_session: Session) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _assert_bridge_request(
-    request: BridgeRequest,
-    *,
-    customer_id: int,
-    base_url: str,
-    instance_id: str = "default",
-    tenant_id: str = "",
-    audience: str = "",
-    correlation_id: str | None,
-    timeout_seconds: int = 10,
-    retry_count: int = 0,
-    retry_backoff_seconds: float = 0.0,
-    legacy_api_key: str | None = "bridge-secret",
-) -> None:
-    assert request.base_url == base_url
-    assert request.correlation_id == correlation_id
-    assert request.timeout_seconds == timeout_seconds
-    assert request.retry_count == retry_count
-    assert request.retry_backoff_seconds == retry_backoff_seconds
-    assert request.legacy_api_key == legacy_api_key
-    claims = jwt.get_unverified_claims(request.access_token)
-    assert claims["customer_id"] == str(customer_id)
-    assert claims["instance_id"] == instance_id
-    assert claims["tenant_id"] == tenant_id
-    assert claims["aud"] == audience
-    assert claims["token_type"] == "bridge_access"
-
-
 def test_customer_bridge_health_and_capabilities_use_customer_configuration(
     client: TestClient,
     db_session: Session,
@@ -422,14 +393,6 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
     assert bridge_config_response.json() == {
         "customer_id": customer_id,
         "customer_name": "Tehran Customer",
-        "instance_id": "default",
-        "base_url_internal": None,
-        "audience": None,
-        "tenant_id": None,
-        "status": "inactive",
-        "request_timeout_seconds": None,
-        "request_retry_count": None,
-        "request_retry_backoff_seconds": None,
         "bridge_base_url": None,
         "bridge_is_enabled": False,
         "bridge_has_api_key": False,
@@ -451,14 +414,6 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
     assert bridge_update_response.json() == {
         "customer_id": customer_id,
         "customer_name": "Tehran Customer",
-        "instance_id": "default",
-        "base_url_internal": "https://tehran.example.com",
-        "audience": "zaraamad:default",
-        "tenant_id": str(customer_id),
-        "status": "active",
-        "request_timeout_seconds": None,
-        "request_retry_count": None,
-        "request_retry_backoff_seconds": None,
         "bridge_base_url": "https://tehran.example.com",
         "bridge_is_enabled": True,
         "bridge_has_api_key": True,
@@ -505,38 +460,35 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
         "support.capabilities.read",
     ]
 
-    assert [item[0] for item in bridge_client.requests] == [
-        "health",
-        "health",
-        "capabilities",
+    assert bridge_client.requests == [
+        (
+            "health",
+            BridgeRequest(
+                base_url="https://tehran.example.com",
+                api_key="bridge-secret",
+                timeout_seconds=10,
+                correlation_id="corr-refresh",
+            ),
+        ),
+        (
+            "health",
+            BridgeRequest(
+                base_url="https://tehran.example.com",
+                api_key="bridge-secret",
+                timeout_seconds=10,
+                correlation_id="corr-123",
+            ),
+        ),
+        (
+            "capabilities",
+            BridgeRequest(
+                base_url="https://tehran.example.com",
+                api_key="bridge-secret",
+                timeout_seconds=10,
+                correlation_id=None,
+            ),
+        ),
     ]
-    _assert_bridge_request(
-        bridge_client.requests[0][1],
-        customer_id=customer_id,
-        base_url="https://tehran.example.com",
-        instance_id="default",
-        tenant_id=str(customer_id),
-        audience="zaraamad:default",
-        correlation_id="corr-refresh",
-    )
-    _assert_bridge_request(
-        bridge_client.requests[1][1],
-        customer_id=customer_id,
-        base_url="https://tehran.example.com",
-        instance_id="default",
-        tenant_id=str(customer_id),
-        audience="zaraamad:default",
-        correlation_id="corr-123",
-    )
-    _assert_bridge_request(
-        bridge_client.requests[2][1],
-        customer_id=customer_id,
-        base_url="https://tehran.example.com",
-        instance_id="default",
-        tenant_id=str(customer_id),
-        audience="zaraamad:default",
-        correlation_id=None,
-    )
 
 
 def test_customer_bridge_subscription_uses_customer_configuration(
@@ -582,75 +534,15 @@ def test_customer_bridge_subscription_uses_customer_configuration(
         "status_message": "",
     }
 
-    assert [item[0] for item in bridge_client.requests] == ["subscription"]
-    _assert_bridge_request(
-        bridge_client.requests[0][1],
-        customer_id=customer_id,
-        base_url="https://subscription.example.com",
-        instance_id="default",
-        tenant_id=str(customer_id),
-        audience="zaraamad:default",
-        correlation_id="corr-subscription",
-    )
-
-
-def test_customer_bridge_health_uses_instance_registry_claims_and_retry_metadata(
-    client: TestClient,
-    db_session: Session,
-) -> None:
-    bridge_client = RecordingBridgeClient()
-    app.dependency_overrides[get_bridge_client] = lambda: bridge_client
-    headers = _admin_headers(client=client, db_session=db_session)
-
-    customer_response = client.post(
-        "/customers",
-        headers=headers,
-        json={
-            "name": "Registry Customer",
-            "grade": 2,
-        },
-    )
-    assert customer_response.status_code == 201
-    customer_id = customer_response.json()["id"]
-
-    bridge_update_response = client.patch(
-        f"/customers/{customer_id}/bridge",
-        headers=headers,
-        json={
-            "instance_id": "karaj-main",
-            "base_url_internal": "https://karaj-internal.example.com/",
-            "audience": "zaraamad:karaj-main",
-            "tenant_id": "karaj",
-            "status": "active",
-            "request_timeout_seconds": 33,
-            "request_retry_count": 2,
-            "request_retry_backoff_seconds": 1.5,
-        },
-    )
-    assert bridge_update_response.status_code == 200
-
-    health_response = client.get(
-        f"/customers/{customer_id}/bridge/health",
-        params={"instance_id": "karaj-main"},
-        headers={**headers, "X-Correlation-ID": "corr-registry"},
-    )
-    assert health_response.status_code == 200
-    assert health_response.json()["bridge_base_url"] == "https://karaj-internal.example.com"
-
-    assert [item[0] for item in bridge_client.requests] == ["health"]
-    _assert_bridge_request(
-        bridge_client.requests[0][1],
-        customer_id=customer_id,
-        base_url="https://karaj-internal.example.com",
-        instance_id="karaj-main",
-        tenant_id="karaj",
-        audience="zaraamad:karaj-main",
-        correlation_id="corr-registry",
-        timeout_seconds=33,
-        retry_count=2,
-        retry_backoff_seconds=1.5,
-        legacy_api_key=None,
-    )
+    assert bridge_client.requests == [(
+        "subscription",
+        BridgeRequest(
+            base_url="https://subscription.example.com",
+            api_key="bridge-secret",
+            timeout_seconds=10,
+            correlation_id="corr-subscription",
+        ),
+    )]
 
 
 def test_customer_bridge_health_rejects_incomplete_bridge_configuration(
@@ -675,7 +567,7 @@ def test_customer_bridge_health_rejects_incomplete_bridge_configuration(
     )
     assert response.status_code == 409
     assert response.json()["message"] == CUSTOMER_BRIDGE_NOT_CONFIGURED
-    assert "bridge_row" in response.json()["developer_message"]
+    assert "bridge_is_enabled" in response.json()["developer_message"]
 
 
 def test_customer_bridge_subscription_config_fetch_and_sync_use_customer_configuration(
@@ -779,35 +671,43 @@ def test_customer_bridge_subscription_config_fetch_and_sync_use_customer_configu
         ],
     }
 
-    assert [item[0] for item in bridge_client.requests] == [
-        "subscription-config",
-        "subscription-config-sync",
+    assert bridge_client.requests == [
+        (
+            "subscription-config",
+            BridgeRequest(
+                base_url="https://subscription.example.com",
+                api_key="bridge-secret",
+                timeout_seconds=10,
+                correlation_id="corr-config",
+            ),
+        ),
+        (
+            "subscription-config-sync",
+            BridgeRequest(
+                base_url="https://subscription.example.com",
+                api_key="bridge-secret",
+                timeout_seconds=10,
+                correlation_id="corr-sync",
+            ),
+            {
+                "subscription": {
+                    "end_date": "1405-03-01 00:00:00",
+                    "grace_period_end_date": "1405-03-07 00:00:00",
+                    "is_active": False,
+                },
+                "messages": [
+                    {
+                        "status": "expired",
+                        "message_template": "اشتراک شما به پایان رسیده است.",
+                    },
+                    {
+                        "status": "grace",
+                        "message_template": "مهلت شما {days} روز دیگر ادامه دارد.",
+                    },
+                ],
+            },
+        ),
     ]
-    _assert_bridge_request(
-        bridge_client.requests[0][1],
-        customer_id=customer_id,
-        base_url="https://subscription.example.com",
-        instance_id="default",
-        tenant_id=str(customer_id),
-        audience="zaraamad:default",
-        correlation_id="corr-config",
-    )
-    _assert_bridge_request(
-        bridge_client.requests[1][1],
-        customer_id=customer_id,
-        base_url="https://subscription.example.com",
-        instance_id="default",
-        tenant_id=str(customer_id),
-        audience="zaraamad:default",
-        correlation_id="corr-sync",
-    )
-    sync_payload = bridge_client.requests[1][2]
-    assert sync_payload["subscription"] == {
-        "end_date": "1405-03-01 00:00:00",
-        "grace_period_end_date": "1405-03-07 00:00:00",
-        "is_active": False,
-    }
-    assert [item["status"] for item in sync_payload["messages"]] == ["expired", "grace"]
 
 
 def test_customer_bridge_subscription_maps_missing_upstream_subscription_to_not_found(
@@ -849,16 +749,15 @@ def test_customer_bridge_subscription_maps_missing_upstream_subscription_to_not_
     assert response.json()["message"] == "هیچ اشتراک فعالی وجود ندارد."
     assert "returned status 404" in response.json()["developer_message"]
 
-    assert [item[0] for item in bridge_client.requests] == ["subscription"]
-    _assert_bridge_request(
-        bridge_client.requests[0][1],
-        customer_id=customer_id,
-        base_url="https://subscription.example.com",
-        instance_id="default",
-        tenant_id=str(customer_id),
-        audience="zaraamad:default",
-        correlation_id=None,
-    )
+    assert bridge_client.requests == [(
+        "subscription",
+        BridgeRequest(
+            base_url="https://subscription.example.com",
+            api_key="bridge-secret",
+            timeout_seconds=10,
+            correlation_id=None,
+        ),
+    )]
 
 
 def test_customer_bridge_subscription_surfaces_upstream_error_details_for_debugging(

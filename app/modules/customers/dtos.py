@@ -3,7 +3,7 @@ from typing import Self
 from datetime import datetime
 import re
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.common.dtos import MongoDTO, WithId
 from app.common.messages import ITEMS_MUST_NOT_BE_EMPTY
@@ -14,7 +14,7 @@ CUSTOMER_INCOME_MONTH_PATTERN = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
 class CustomerBridgeConfigNormalizer(MongoDTO):
-    @field_validator("base_url_internal", "bridge_base_url", check_fields=False)
+    @field_validator("bridge_base_url", check_fields=False)
     @classmethod
     def normalize_bridge_base_url(cls, value: str | None) -> str | None:
         if value is None:
@@ -22,26 +22,12 @@ class CustomerBridgeConfigNormalizer(MongoDTO):
         normalized_value = value.strip().rstrip("/")
         return normalized_value or None
 
-    @field_validator(
-        "bridge_api_key",
-        "instance_id",
-        "audience",
-        "tenant_id",
-        check_fields=False,
-    )
+    @field_validator("bridge_api_key", check_fields=False)
     @classmethod
-    def normalize_bridge_text(cls, value: str | None) -> str | None:
+    def normalize_bridge_api_key(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized_value = value.strip()
-        return normalized_value or None
-
-    @field_validator("status", check_fields=False)
-    @classmethod
-    def normalize_bridge_status(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized_value = value.strip().lower()
         return normalized_value or None
 
 
@@ -260,70 +246,21 @@ class CustomerUpdate(MongoDTO):
 
 
 class CustomerBridgeConfigUpdate(CustomerBridgeConfigNormalizer):
-    instance_id: str | None = Field(
+    bridge_base_url: str | None = Field(
         default=None,
-        description="Bridge instance identifier for this customer.",
-        examples=["default", "tehran-prod"],
-    )
-    base_url_internal: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("base_url_internal", "bridge_base_url"),
-        description="Internal base URL for routing Portal requests to Zaraamad.",
+        description="Customer bridge base URL.",
         examples=["https://tehran.example.com"],
     )
     bridge_api_key: str | None = Field(
         default=None,
-        description="Legacy bridge API key (optional transitional fallback).",
+        description="Shared secret used for bridge requests.",
         examples=["bridge-secret"],
-    )
-    audience: str | None = Field(
-        default=None,
-        description="Audience claim expected by the target Zaraamad instance.",
-        examples=["zaraamad:tehran-prod"],
-    )
-    tenant_id: str | None = Field(
-        default=None,
-        description="Tenant identifier claim to send for the target instance.",
-        examples=["tehran"],
-    )
-    status: str | None = Field(
-        default=None,
-        description="Bridge routing/auth status. Use 'active' to allow outbound traffic.",
-        examples=["active", "inactive"],
     )
     bridge_is_enabled: bool | None = Field(
         default=None,
-        description="Legacy alias for status. true => active, false => inactive.",
+        description="Whether customer bridge access is enabled.",
         examples=[True],
     )
-    request_timeout_seconds: int | None = Field(
-        default=None,
-        ge=1,
-        description="Optional per-instance request timeout override in seconds.",
-        examples=[10],
-    )
-    request_retry_count: int | None = Field(
-        default=None,
-        ge=0,
-        description="Optional retry count for transient upstream connectivity errors.",
-        examples=[1],
-    )
-    request_retry_backoff_seconds: float | None = Field(
-        default=None,
-        ge=0,
-        description="Optional retry backoff between attempts in seconds.",
-        examples=[0.25],
-    )
-
-    @model_validator(mode="after")
-    def normalize_legacy_status_alias(self) -> Self:
-        if self.bridge_is_enabled is None:
-            return self
-        legacy_status = "active" if self.bridge_is_enabled else "inactive"
-        if self.status is not None and self.status != legacy_status:
-            raise ValueError("status and bridge_is_enabled conflict.")
-        self.status = legacy_status
-        return self
 
     @model_validator(mode="after")
     def validate_has_updates(self) -> Self:
@@ -335,54 +272,14 @@ class CustomerBridgeConfigUpdate(CustomerBridgeConfigNormalizer):
 class CustomerBridgeConfigOut(MongoDTO):
     customer_id: int = Field(..., description="Customer id.", examples=[1])
     customer_name: str = Field(..., description="Customer name.", examples=["Tehran Customer"])
-    instance_id: str = Field(
-        ...,
-        description="Bridge instance identifier.",
-        examples=["default"],
-    )
-    base_url_internal: str | None = Field(
-        default=None,
-        description="Configured internal target base URL for this customer instance.",
-        examples=["https://tehran.example.com"],
-    )
-    audience: str | None = Field(
-        default=None,
-        description="Configured audience claim for this instance.",
-        examples=["zaraamad:tehran-prod"],
-    )
-    tenant_id: str | None = Field(
-        default=None,
-        description="Configured tenant identifier for this instance.",
-        examples=["tehran"],
-    )
-    status: str = Field(
-        ...,
-        description="Current bridge instance status.",
-        examples=["active"],
-    )
-    request_timeout_seconds: int | None = Field(
-        default=None,
-        description="Optional per-instance timeout override in seconds.",
-        examples=[10],
-    )
-    request_retry_count: int | None = Field(
-        default=None,
-        description="Optional retry count for transient connectivity failures.",
-        examples=[1],
-    )
-    request_retry_backoff_seconds: float | None = Field(
-        default=None,
-        description="Optional retry backoff in seconds.",
-        examples=[0.25],
-    )
     bridge_base_url: str | None = Field(
         default=None,
-        description="Legacy alias of base_url_internal.",
+        description="Configured bridge base URL for this customer.",
         examples=["https://tehran.example.com"],
     )
     bridge_is_enabled: bool = Field(
         ...,
-        description="Legacy status alias. true when status is active.",
+        description="Whether bridge access is enabled for this customer.",
         examples=[True],
     )
     bridge_has_api_key: bool = Field(

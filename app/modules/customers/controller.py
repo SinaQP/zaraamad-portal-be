@@ -23,6 +23,10 @@ from app.modules.customers.dtos import (
     CustomerUpdate,
 )
 from app.modules.customers.mappers import CustomerMapper, get_customer_mapper
+from app.modules.customers.portal_bridge_pilot_service import (
+    CustomerPortalBridgePilotService,
+    get_customer_portal_bridge_pilot_service,
+)
 from app.modules.customers.service import (
     CustomerBridgeService,
     CustomerBridgeConfigService,
@@ -466,21 +470,50 @@ def test_customer_database_connection(
 )
 def get_customer_bridge_config(
     customer_id: int,
-    instance_id: str | None = Query(
-        default=None,
-        description="Optional bridge instance id used to resolve the Bridge registry row.",
-    ),
     _: object = Depends(require_admin),
     service: CustomerBridgeConfigService = Depends(get_customer_bridge_config_service),
     mapper: CustomerMapper = Depends(get_customer_mapper),
 ) -> CustomerBridgeConfigOut:
-    customer, bridge_config = service.get_active(
-        customer_id=customer_id,
-        instance_id=instance_id,
-    )
+    customer, bridge_config = service.get_active(customer_id=customer_id)
     return mapper.to_bridge_config_out(
         customer=customer,
         bridge_config=bridge_config,
+    )
+
+
+@router.get(
+    "/{customer_id}/bridge/pilot/ping",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=dict[str, object],
+    summary="Proxy pilot Portal to Zaraamad request",
+    description=(
+        "Pilot endpoint for the minimal Portal to Zaraamad backend flow. "
+        "Portal resolves the Zaraamad target URL from the existing customer bridge row, "
+        "mints a short-lived RS256 JWT, and proxies one internal Zaraamad API call."
+    ),
+    responses={
+        200: {"description": "Pilot Zaraamad response returned."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        409: {"description": "Customer bridge routing config is incomplete."},
+        502: {"description": "Zaraamad rejected the request or returned an invalid response."},
+        503: {"description": "Zaraamad is unreachable or Portal signing config is unavailable."},
+    },
+)
+def proxy_customer_bridge_pilot_ping(
+    customer_id: int,
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to Zaraamad.",
+    ),
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerPortalBridgePilotService = Depends(get_customer_portal_bridge_pilot_service),
+) -> dict[str, object]:
+    return service.proxy_pilot_ping(
+        customer_id=customer_id,
+        current_user=current_user,
+        correlation_id=x_correlation_id,
     )
 
 
@@ -499,10 +532,6 @@ def get_customer_bridge_config(
 )
 def refresh_customer_bridge_status(
     customer_id: int,
-    instance_id: str | None = Query(
-        default=None,
-        description="Optional bridge instance id used to resolve the Bridge registry row.",
-    ),
     x_correlation_id: str | None = Header(
         default=None,
         alias="X-Correlation-ID",
@@ -514,7 +543,6 @@ def refresh_customer_bridge_status(
 ) -> CustomerBridgeConfigOut:
     customer, bridge_config = service.refresh_status(
         customer_id=customer_id,
-        instance_id=instance_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_bridge_config_out(
@@ -570,10 +598,6 @@ def update_customer_bridge_config(
 )
 def get_customer_bridge_health(
     customer_id: int,
-    instance_id: str | None = Query(
-        default=None,
-        description="Optional bridge instance id used to resolve the Bridge registry row.",
-    ),
     x_correlation_id: str | None = Header(
         default=None,
         alias="X-Correlation-ID",
@@ -585,7 +609,6 @@ def get_customer_bridge_health(
 ) -> CustomerBridgeHealthOut:
     customer, bridge_config, bridge_health = service.get_health(
         customer_id=customer_id,
-        instance_id=instance_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_bridge_health_out(
@@ -612,10 +635,6 @@ def get_customer_bridge_health(
 )
 def get_customer_bridge_capabilities(
     customer_id: int,
-    instance_id: str | None = Query(
-        default=None,
-        description="Optional bridge instance id used to resolve the Bridge registry row.",
-    ),
     x_correlation_id: str | None = Header(
         default=None,
         alias="X-Correlation-ID",
@@ -627,7 +646,6 @@ def get_customer_bridge_capabilities(
 ) -> CustomerBridgeCapabilitiesOut:
     customer, bridge_config, bridge_capabilities = service.get_capabilities(
         customer_id=customer_id,
-        instance_id=instance_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_bridge_capabilities_out(
@@ -654,10 +672,6 @@ def get_customer_bridge_capabilities(
 )
 def get_customer_bridge_subscription(
     customer_id: int,
-    instance_id: str | None = Query(
-        default=None,
-        description="Optional bridge instance id used to resolve the Bridge registry row.",
-    ),
     x_correlation_id: str | None = Header(
         default=None,
         alias="X-Correlation-ID",
@@ -669,7 +683,6 @@ def get_customer_bridge_subscription(
 ) -> BridgeSubscriptionOut:
     _, _, bridge_subscription = service.fetch_active_subscription(
         customer_id=customer_id,
-        instance_id=instance_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_subscription_out(
@@ -696,10 +709,6 @@ def get_customer_bridge_subscription(
 def update_customer_bridge_subscription(
     customer_id: int,
     payload: BridgeSubscriptionUpdate,
-    instance_id: str | None = Query(
-        default=None,
-        description="Optional bridge instance id used to resolve the Bridge registry row.",
-    ),
     x_correlation_id: str | None = Header(
         default=None,
         alias="X-Correlation-ID",
@@ -712,7 +721,6 @@ def update_customer_bridge_subscription(
     _, _, bridge_subscription = service.update_bridge_subscription(
         customer_id=customer_id,
         payload=payload.model_dump(mode="json", exclude_unset=True, exclude_none=False),
-        instance_id=instance_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_subscription_out(
@@ -736,10 +744,6 @@ def update_customer_bridge_subscription(
 )
 def get_customer_bridge_subscription_messages(
     customer_id: int,
-    instance_id: str | None = Query(
-        default=None,
-        description="Optional bridge instance id used to resolve the Bridge registry row.",
-    ),
     x_correlation_id: str | None = Header(
         default=None,
         alias="X-Correlation-ID",
@@ -751,7 +755,6 @@ def get_customer_bridge_subscription_messages(
 ) -> list[BridgeSubscriptionMessageOut]:
     _, _, bridge_messages = service.get_subscription_messages(
         customer_id=customer_id,
-        instance_id=instance_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_messages_out(messages=bridge_messages)
@@ -775,10 +778,6 @@ def get_customer_bridge_subscription_messages(
 def update_customer_bridge_subscription_messages(
     customer_id: int,
     payload: list[BridgeSubscriptionMessageUpdate],
-    instance_id: str | None = Query(
-        default=None,
-        description="Optional bridge instance id used to resolve the Bridge registry row.",
-    ),
     x_correlation_id: str | None = Header(
         default=None,
         alias="X-Correlation-ID",
@@ -791,7 +790,6 @@ def update_customer_bridge_subscription_messages(
     _, _, bridge_messages = service.upsert_subscription_messages(
         customer_id=customer_id,
         payload=[item.model_dump(mode="json") for item in payload],
-        instance_id=instance_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_messages_out(messages=bridge_messages)
@@ -814,10 +812,6 @@ def update_customer_bridge_subscription_messages(
 )
 def get_customer_bridge_subscription_config(
     customer_id: int,
-    instance_id: str | None = Query(
-        default=None,
-        description="Optional bridge instance id used to resolve the Bridge registry row.",
-    ),
     x_correlation_id: str | None = Header(
         default=None,
         alias="X-Correlation-ID",
@@ -829,7 +823,6 @@ def get_customer_bridge_subscription_config(
 ) -> BridgeSubscriptionConfigOut:
     _, _, bridge_config_result = service.get_subscription_config(
         customer_id=customer_id,
-        instance_id=instance_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_config_out(config=bridge_config_result)
@@ -854,10 +847,6 @@ def get_customer_bridge_subscription_config(
 def sync_customer_bridge_subscription_config(
     customer_id: int,
     payload: BridgeSubscriptionConfigUpdate,
-    instance_id: str | None = Query(
-        default=None,
-        description="Optional bridge instance id used to resolve the Bridge registry row.",
-    ),
     x_correlation_id: str | None = Header(
         default=None,
         alias="X-Correlation-ID",
@@ -870,7 +859,6 @@ def sync_customer_bridge_subscription_config(
     _, _, bridge_config_result = service.sync_subscription_config(
         customer_id=customer_id,
         payload=payload.model_dump(mode="json", exclude_unset=True, exclude_none=False),
-        instance_id=instance_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_config_out(
@@ -895,10 +883,6 @@ def sync_customer_bridge_subscription_config(
 )
 def refresh_customer_bridge_subscription(
     customer_id: int,
-    instance_id: str | None = Query(
-        default=None,
-        description="Optional bridge instance id used to resolve the Bridge registry row.",
-    ),
     x_correlation_id: str | None = Header(
         default=None,
         alias="X-Correlation-ID",
@@ -910,7 +894,6 @@ def refresh_customer_bridge_subscription(
 ) -> CustomerBridgeSubscriptionOut:
     customer, bridge_config = service.refresh_subscription(
         customer_id=customer_id,
-        instance_id=instance_id,
         correlation_id=x_correlation_id,
     )
     return mapper.to_bridge_subscription_out(

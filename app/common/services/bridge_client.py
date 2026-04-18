@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -18,12 +17,9 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class BridgeRequest:
     base_url: str
-    access_token: str
+    api_key: str
     timeout_seconds: int
     correlation_id: str | None = None
-    retry_count: int = 0
-    retry_backoff_seconds: float = 0.0
-    legacy_api_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -304,69 +300,48 @@ class BridgeClient:
         method: str = "GET",
         body: Any | None = None,
     ) -> Any:
-        max_attempts = max(request.retry_count + 1, 1)
-        attempt = 1
-        while True:
-            http_request = self._build_request(
-                request=request,
-                path=path,
-                method=method,
-                body=body,
-            )
-            self._log_request(
-                http_request=http_request,
-                timeout_seconds=request.timeout_seconds,
-                attempt=attempt,
-                max_attempts=max_attempts,
-            )
-            try:
-                with urlopen(http_request, timeout=request.timeout_seconds) as response:
-                    raw_response = self._decode_response_body(response.read())
-                    logger.info(
-                        "Bridge response received: method=%s url=%s status=%s",
-                        http_request.get_method(),
-                        http_request.full_url,
-                        getattr(response, "status", "unknown"),
-                    )
-                    break
-            except HTTPError as exc:
-                response_body = self._decode_response_body(exc.read())
-                logger.warning(
-                    "Bridge response error: method=%s url=%s status=%s body=%s",
+        http_request = self._build_request(
+            request=request,
+            path=path,
+            method=method,
+            body=body,
+        )
+        self._log_request(http_request=http_request, timeout_seconds=request.timeout_seconds)
+        try:
+            with urlopen(http_request, timeout=request.timeout_seconds) as response:
+                raw_response = self._decode_response_body(response.read())
+                logger.info(
+                    "Bridge response received: method=%s url=%s status=%s",
                     http_request.get_method(),
                     http_request.full_url,
-                    exc.code,
-                    response_body,
+                    getattr(response, "status", "unknown"),
                 )
-                should_retry_http = (
-                    exc.code >= 500
-                    and attempt < max_attempts
-                )
-                if should_retry_http:
-                    self._sleep_before_retry(request=request, next_attempt=attempt + 1)
-                    attempt += 1
-                    continue
-                if exc.code in {401, 403}:
-                    raise BridgeUnauthorizedError(
-                        status_code=exc.code,
-                        response_body=response_body,
-                    ) from exc
-                raise BridgeUnexpectedStatusError(
+        except HTTPError as exc:
+            response_body = self._decode_response_body(exc.read())
+            logger.warning(
+                "Bridge response error: method=%s url=%s status=%s body=%s",
+                http_request.get_method(),
+                http_request.full_url,
+                exc.code,
+                response_body,
+            )
+            if exc.code in {401, 403}:
+                raise BridgeUnauthorizedError(
                     status_code=exc.code,
                     response_body=response_body,
                 ) from exc
-            except (TimeoutError, URLError, OSError) as exc:
-                logger.warning(
-                    "Bridge connection error: method=%s url=%s error=%s",
-                    http_request.get_method(),
-                    http_request.full_url,
-                    exc,
-                )
-                if attempt < max_attempts:
-                    self._sleep_before_retry(request=request, next_attempt=attempt + 1)
-                    attempt += 1
-                    continue
-                raise BridgeConnectionError(str(exc)) from exc
+            raise BridgeUnexpectedStatusError(
+                status_code=exc.code,
+                response_body=response_body,
+            ) from exc
+        except (TimeoutError, URLError, OSError) as exc:
+            logger.warning(
+                "Bridge connection error: method=%s url=%s error=%s",
+                http_request.get_method(),
+                http_request.full_url,
+                exc,
+            )
+            raise BridgeConnectionError(str(exc)) from exc
         try:
             payload = json.loads(raw_response)
         except json.JSONDecodeError as exc:
@@ -384,10 +359,8 @@ class BridgeClient:
         base_url = request.base_url.rstrip("/")
         headers = {
             "Accept": "application/json",
-            "Authorization": f"Bearer {request.access_token}",
+            "X-Bridge-Key": request.api_key,
         }
-        if request.legacy_api_key:
-            headers["X-Bridge-Key"] = request.legacy_api_key
         if request.correlation_id:
             headers["X-Correlation-ID"] = request.correlation_id
         encoded_body: bytes | None = None
@@ -480,14 +453,7 @@ class BridgeClient:
             return value.value
         raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable.")
 
-    def _log_request(
-        self,
-        http_request: Request,
-        timeout_seconds: int,
-        *,
-        attempt: int,
-        max_attempts: int,
-    ) -> None:
+    def _log_request(self, http_request: Request, timeout_seconds: int) -> None:
         raw_body = getattr(http_request, "data", None)
         body_text: str | None = None
         if isinstance(raw_body, bytes):
@@ -495,12 +461,10 @@ class BridgeClient:
         elif isinstance(raw_body, str):
             body_text = raw_body
         logger.info(
-            "Bridge request sending: method=%s url=%s timeout_seconds=%s attempt=%s/%s headers=%s body=%s",
+            "Bridge request sending: method=%s url=%s timeout_seconds=%s headers=%s body=%s",
             http_request.get_method(),
             http_request.full_url,
             timeout_seconds,
-            attempt,
-            max_attempts,
             self._sanitize_headers(dict(http_request.header_items())),
             body_text,
         )
@@ -508,7 +472,7 @@ class BridgeClient:
     def _sanitize_headers(self, headers: dict[str, str]) -> dict[str, str]:
         sanitized_headers = dict(headers)
         for key in list(sanitized_headers):
-            if key.lower() in {"x-bridge-key", "authorization"}:
+            if key.lower() == "x-bridge-key":
                 sanitized_headers[key] = self._mask_secret(sanitized_headers[key])
         return sanitized_headers
 
@@ -516,16 +480,6 @@ class BridgeClient:
         if len(value) <= 4:
             return "*" * len(value)
         return f"{'*' * (len(value) - 4)}{value[-4:]}"
-
-    def _sleep_before_retry(self, *, request: BridgeRequest, next_attempt: int) -> None:
-        backoff_seconds = max(request.retry_backoff_seconds, 0.0)
-        logger.info(
-            "Bridge request retry scheduled: next_attempt=%s backoff_seconds=%s",
-            next_attempt,
-            backoff_seconds,
-        )
-        if backoff_seconds > 0:
-            time.sleep(backoff_seconds)
 
 
 def get_bridge_client() -> BridgeClient:
