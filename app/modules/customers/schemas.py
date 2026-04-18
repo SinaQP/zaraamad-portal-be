@@ -16,21 +16,32 @@ class Customer(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
 
-class CustomerBridgeConfig(Base, TimestampMixin):
-    __tablename__ = "customer_bridge_configs"
+class Bridge(Base, TimestampMixin):
+    __tablename__ = "Bridge"
 
     customer_id: Mapped[int] = mapped_column(
         ForeignKey("customers.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    bridge_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    bridge_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    bridge_is_enabled: Mapped[bool] = mapped_column(
-        Boolean,
+    instance_id: Mapped[str] = mapped_column(
+        String(255),
         nullable=False,
-        default=False,
-        server_default="false",
+        default="default",
+        server_default="default",
     )
+    base_url_internal: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    audience: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="inactive",
+        server_default="inactive",
+    )
+    request_timeout_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    request_retry_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    request_retry_backoff_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bridge_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_online_status: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     last_health_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_health_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
@@ -41,6 +52,26 @@ class CustomerBridgeConfig(Base, TimestampMixin):
     cached_subscription_status_message: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     last_subscription_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_subscription_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    @property
+    def bridge_base_url(self) -> str | None:
+        return self.base_url_internal
+
+    @bridge_base_url.setter
+    def bridge_base_url(self, value: str | None) -> None:
+        self.base_url_internal = value
+
+    @property
+    def bridge_is_enabled(self) -> bool:
+        return self.status == "active"
+
+    @bridge_is_enabled.setter
+    def bridge_is_enabled(self, value: bool) -> None:
+        self.status = "active" if value else "inactive"
+
+
+# Backward compatibility alias for existing imports.
+CustomerBridgeConfig = Bridge
 
 
 class CustomerDatabaseConnection(Base, TimestampMixin):

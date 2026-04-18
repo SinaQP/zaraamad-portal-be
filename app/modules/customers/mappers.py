@@ -43,11 +43,20 @@ class CustomerMapper:
         customer: Customer,
         bridge_config: CustomerBridgeConfig | None,
     ) -> CustomerBridgeConfigOut:
+        base_url_internal = bridge_config.base_url_internal if bridge_config else None
         return CustomerBridgeConfigOut(
             customer_id=customer.id,
             customer_name=customer.name,
-            bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
-            bridge_is_enabled=bridge_config.bridge_is_enabled if bridge_config else False,
+            instance_id=bridge_config.instance_id if bridge_config else "default",
+            base_url_internal=base_url_internal,
+            audience=bridge_config.audience if bridge_config else None,
+            tenant_id=bridge_config.tenant_id if bridge_config else None,
+            status=bridge_config.status if bridge_config else "inactive",
+            request_timeout_seconds=bridge_config.request_timeout_seconds if bridge_config else None,
+            request_retry_count=bridge_config.request_retry_count if bridge_config else None,
+            request_retry_backoff_seconds=bridge_config.request_retry_backoff_seconds if bridge_config else None,
+            bridge_base_url=base_url_internal,
+            bridge_is_enabled=bridge_config.status == "active" if bridge_config else False,
             bridge_has_api_key=bool(bridge_config and bridge_config.bridge_api_key),
             last_online_status=bridge_config.last_online_status if bridge_config else None,
             last_health_checked_at=bridge_config.last_health_checked_at if bridge_config else None,
@@ -87,7 +96,11 @@ class CustomerMapper:
         return CustomerBridgeHealthOut(
             customer_id=customer.id,
             customer_name=customer.name,
-            bridge_base_url=bridge_config.bridge_base_url if bridge_config and bridge_config.bridge_base_url else "",
+            bridge_base_url=(
+                bridge_config.base_url_internal
+                if bridge_config and bridge_config.base_url_internal
+                else ""
+            ),
             status=bridge_health.status,
             bridge_name=bridge_health.bridge_name,
             bridge_version=bridge_health.bridge_version,
@@ -102,7 +115,11 @@ class CustomerMapper:
         return CustomerBridgeCapabilitiesOut(
             customer_id=customer.id,
             customer_name=customer.name,
-            bridge_base_url=bridge_config.bridge_base_url if bridge_config and bridge_config.bridge_base_url else "",
+            bridge_base_url=(
+                bridge_config.base_url_internal
+                if bridge_config and bridge_config.base_url_internal
+                else ""
+            ),
             bridge_name=bridge_capabilities.bridge_name,
             bridge_version=bridge_capabilities.bridge_version,
             capabilities=[
@@ -123,7 +140,11 @@ class CustomerMapper:
         return CustomerBridgeSubscriptionOut(
             customer_id=customer.id,
             customer_name=customer.name,
-            bridge_base_url=bridge_config.bridge_base_url if bridge_config and bridge_config.bridge_base_url else "",
+            bridge_base_url=(
+                bridge_config.base_url_internal
+                if bridge_config and bridge_config.base_url_internal
+                else ""
+            ),
             start_date=bridge_config.cached_subscription_start_date if bridge_config and bridge_config.cached_subscription_start_date else "",
             end_date=bridge_config.cached_subscription_end_date if bridge_config and bridge_config.cached_subscription_end_date else "",
             grace_period_end_date=bridge_config.cached_subscription_grace_period_end_date if bridge_config else None,

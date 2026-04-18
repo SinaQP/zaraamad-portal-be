@@ -44,6 +44,10 @@ from app.common.security.secret_cipher import (
     SecretCipherService,
     get_secret_cipher_service,
 )
+from app.common.security.bridge_token_service import (
+    BridgeAccessTokenService,
+    get_bridge_access_token_service,
+)
 from app.common.pagination import PaginationMeta, PaginationParams
 from app.common.services.bridge_client import (
     BridgeCapabilitiesResult,
@@ -288,14 +292,28 @@ class CustomerBridgeConfigService:
         self._db_session = db_session
         self._customer_service = customer_service
 
-    def get(self, customer_id: int) -> tuple[Customer, CustomerBridgeConfig | None]:
+    def get(
+        self,
+        customer_id: int,
+        instance_id: str | None = None,
+    ) -> tuple[Customer, CustomerBridgeConfig | None]:
         customer = self._customer_service.get_or_404(customer_id=customer_id)
-        bridge_config = self._db_session.get(CustomerBridgeConfig, customer_id)
+        bridge_config = self._find_bridge_config(
+            customer_id=customer_id,
+            instance_id=instance_id,
+        )
         return customer, bridge_config
 
-    def get_active(self, customer_id: int) -> tuple[Customer, CustomerBridgeConfig | None]:
+    def get_active(
+        self,
+        customer_id: int,
+        instance_id: str | None = None,
+    ) -> tuple[Customer, CustomerBridgeConfig | None]:
         customer = self._customer_service.get_active_or_404(customer_id=customer_id)
-        bridge_config = self._db_session.get(CustomerBridgeConfig, customer_id)
+        bridge_config = self._find_bridge_config(
+            customer_id=customer_id,
+            instance_id=instance_id,
+        )
         return customer, bridge_config
 
     def upsert(
@@ -303,13 +321,31 @@ class CustomerBridgeConfigService:
         customer_id: int,
         dto: CustomerBridgeConfigUpdate,
     ) -> tuple[Customer, CustomerBridgeConfig]:
-        customer, bridge_config = self.get(customer_id=customer_id)
+        customer = self._customer_service.get_or_404(customer_id=customer_id)
+        bridge_config = self._find_bridge_config(
+            customer_id=customer_id,
+            instance_id=None,
+        )
+        requested_instance_id = dto.instance_id or "default"
         if bridge_config is None:
-            bridge_config = CustomerBridgeConfig(customer_id=customer_id)
+            bridge_config = CustomerBridgeConfig(
+                customer_id=customer_id,
+                instance_id=requested_instance_id,
+            )
             self._db_session.add(bridge_config)
+        elif dto.instance_id is not None:
+            bridge_config.instance_id = dto.instance_id
         update_data = dto.model_dump(exclude_unset=True, exclude_none=False)
         for field_name, field_value in update_data.items():
             setattr(bridge_config, field_name, field_value)
+        if not bridge_config.instance_id:
+            bridge_config.instance_id = requested_instance_id
+        if not bridge_config.audience:
+            bridge_config.audience = f"zaraamad:{bridge_config.instance_id}"
+        if not bridge_config.tenant_id:
+            bridge_config.tenant_id = str(customer_id)
+        if not bridge_config.status:
+            bridge_config.status = "inactive"
         if update_data:
             self.clear_health_status(bridge_config=bridge_config)
             self.clear_subscription_cache(bridge_config=bridge_config)
@@ -398,15 +434,46 @@ class CustomerBridgeConfigService:
 
     def list_refreshable_customer_ids(self) -> list[int]:
         query = (
-            select(CustomerBridgeConfig.customer_id)
-            .where(CustomerBridgeConfig.bridge_is_enabled.is_(True))
-            .where(CustomerBridgeConfig.bridge_base_url.is_not(None))
-            .where(CustomerBridgeConfig.bridge_base_url != "")
-            .where(CustomerBridgeConfig.bridge_api_key.is_not(None))
-            .where(CustomerBridgeConfig.bridge_api_key != "")
+            select(CustomerBridgeConfig.customer_id).distinct()
+            .where(CustomerBridgeConfig.status == "active")
+            .where(CustomerBridgeConfig.base_url_internal.is_not(None))
+            .where(CustomerBridgeConfig.base_url_internal != "")
+            .where(CustomerBridgeConfig.instance_id.is_not(None))
+            .where(CustomerBridgeConfig.instance_id != "")
+            .where(CustomerBridgeConfig.audience.is_not(None))
+            .where(CustomerBridgeConfig.audience != "")
+            .where(CustomerBridgeConfig.tenant_id.is_not(None))
+            .where(CustomerBridgeConfig.tenant_id != "")
             .order_by(CustomerBridgeConfig.customer_id.asc())
         )
         return list(self._db_session.scalars(query).all())
+
+    def _find_bridge_config(
+        self,
+        *,
+        customer_id: int,
+        instance_id: str | None,
+    ) -> CustomerBridgeConfig | None:
+        query = (
+            select(CustomerBridgeConfig)
+            .where(CustomerBridgeConfig.customer_id == customer_id)
+            .order_by(CustomerBridgeConfig.updated_at.desc())
+        )
+        if instance_id is not None:
+            query = query.where(CustomerBridgeConfig.instance_id == instance_id)
+        results = list(self._db_session.scalars(query).all())
+        if len(results) > 1 and instance_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": CUSTOMER_BRIDGE_NOT_CONFIGURED,
+                    "developer_message": (
+                        f"Customer {customer_id} has multiple bridge instances. "
+                        "Provide instance_id to resolve the target Bridge row."
+                    ),
+                },
+            )
+        return results[0] if results else None
 
 class CustomerDatabaseConnectionValidationError(Exception):
     pass
@@ -1632,9 +1699,14 @@ class CustomerIncomeImportService:
 
 @dataclass(frozen=True)
 class ResolvedCustomerBridgeConfig:
-    base_url: str
-    api_key: str
+    instance_id: str
+    base_url_internal: str
+    audience: str
+    tenant_id: str
     timeout_seconds: int
+    retry_count: int
+    retry_backoff_seconds: float
+    legacy_api_key: str | None = None
 
 
 class CustomerBridgeConfigResolver:
@@ -1647,12 +1719,19 @@ class CustomerBridgeConfigResolver:
         bridge_config: CustomerBridgeConfig | None,
     ) -> ResolvedCustomerBridgeConfig:
         missing_fields: list[str] = []
-        if bridge_config is None or not bridge_config.bridge_is_enabled:
-            missing_fields.append("bridge_is_enabled")
-        if bridge_config is None or not bridge_config.bridge_base_url:
-            missing_fields.append("bridge_base_url")
-        if bridge_config is None or not bridge_config.bridge_api_key:
-            missing_fields.append("bridge_api_key")
+        if bridge_config is None:
+            missing_fields.append("bridge_row")
+        else:
+            if not self._is_active_status(bridge_config.status):
+                missing_fields.append("status")
+            if not bridge_config.instance_id:
+                missing_fields.append("instance_id")
+            if not bridge_config.base_url_internal:
+                missing_fields.append("base_url_internal")
+            if not bridge_config.audience:
+                missing_fields.append("audience")
+            if not bridge_config.tenant_id:
+                missing_fields.append("tenant_id")
         if missing_fields:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -1664,11 +1743,36 @@ class CustomerBridgeConfigResolver:
                     ),
                 },
             )
-        return ResolvedCustomerBridgeConfig(
-            base_url=bridge_config.bridge_base_url,
-            api_key=bridge_config.bridge_api_key,
-            timeout_seconds=self._settings.bridge_request_timeout_seconds,
+        timeout_seconds = (
+            bridge_config.request_timeout_seconds
+            if bridge_config.request_timeout_seconds is not None
+            else self._settings.bridge_request_timeout_seconds
         )
+        retry_count = (
+            bridge_config.request_retry_count
+            if bridge_config.request_retry_count is not None
+            else self._settings.bridge_request_retry_count
+        )
+        retry_backoff_seconds = (
+            bridge_config.request_retry_backoff_seconds
+            if bridge_config.request_retry_backoff_seconds is not None
+            else self._settings.bridge_request_retry_backoff_seconds
+        )
+        return ResolvedCustomerBridgeConfig(
+            instance_id=bridge_config.instance_id,
+            base_url_internal=bridge_config.base_url_internal,
+            audience=bridge_config.audience,
+            tenant_id=bridge_config.tenant_id,
+            timeout_seconds=timeout_seconds,
+            retry_count=retry_count,
+            retry_backoff_seconds=retry_backoff_seconds,
+            legacy_api_key=bridge_config.bridge_api_key,
+        )
+
+    def _is_active_status(self, status_value: str | None) -> bool:
+        if status_value is None:
+            return False
+        return status_value.strip().lower() == "active"
 
 
 class CustomerBridgeService:
@@ -1676,19 +1780,23 @@ class CustomerBridgeService:
         self,
         bridge_config_service: CustomerBridgeConfigService,
         bridge_client: BridgeClient,
+        bridge_access_token_service: BridgeAccessTokenService,
         settings: Settings,
     ) -> None:
         self._bridge_config_service = bridge_config_service
         self._bridge_client = bridge_client
+        self._bridge_access_token_service = bridge_access_token_service
         self._config_resolver = CustomerBridgeConfigResolver(settings=settings)
 
     def get_health(
         self,
         customer_id: int,
+        instance_id: str | None = None,
         correlation_id: str | None = None,
     ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeHealthResult]:
         customer, bridge_config, request = self._build_request(
             customer_id=customer_id,
+            instance_id=instance_id,
             correlation_id=correlation_id,
         )
         checked_at = datetime.now(timezone.utc)
@@ -1709,7 +1817,7 @@ class CustomerBridgeService:
                 )
             raise self._map_bridge_error(
                 customer=customer,
-                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                bridge_base_url=bridge_config.base_url_internal if bridge_config else None,
                 exc=exc,
             ) from exc
         if bridge_config is not None:
@@ -1724,10 +1832,12 @@ class CustomerBridgeService:
     def refresh_status(
         self,
         customer_id: int,
+        instance_id: str | None = None,
         correlation_id: str | None = None,
     ) -> tuple[Customer, CustomerBridgeConfig | None]:
         customer, bridge_config, request = self._build_request(
             customer_id=customer_id,
+            instance_id=instance_id,
             correlation_id=correlation_id,
         )
         checked_at = datetime.now(timezone.utc)
@@ -1759,10 +1869,12 @@ class CustomerBridgeService:
     def get_capabilities(
         self,
         customer_id: int,
+        instance_id: str | None = None,
         correlation_id: str | None = None,
     ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeCapabilitiesResult]:
         customer, bridge_config, request = self._build_request(
             customer_id=customer_id,
+            instance_id=instance_id,
             correlation_id=correlation_id,
         )
         try:
@@ -1775,7 +1887,7 @@ class CustomerBridgeService:
         ) as exc:
             raise self._map_bridge_error(
                 customer=customer,
-                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                bridge_base_url=bridge_config.base_url_internal if bridge_config else None,
                 exc=exc,
             ) from exc
         return customer, bridge_config, bridge_capabilities
@@ -1783,10 +1895,12 @@ class CustomerBridgeService:
     def fetch_active_subscription(
         self,
         customer_id: int,
+        instance_id: str | None = None,
         correlation_id: str | None = None,
     ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeSubscriptionResult]:
         customer, bridge_config, request = self._build_request(
             customer_id=customer_id,
+            instance_id=instance_id,
             correlation_id=correlation_id,
         )
         checked_at = datetime.now(timezone.utc)
@@ -1805,7 +1919,7 @@ class CustomerBridgeService:
             )
             raise self._map_subscription_error(
                 customer=customer,
-                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                bridge_base_url=bridge_config.base_url_internal if bridge_config else None,
                 exc=exc,
             ) from exc
         if bridge_config is not None:
@@ -1820,10 +1934,12 @@ class CustomerBridgeService:
         self,
         customer_id: int,
         payload: dict[str, object],
+        instance_id: str | None = None,
         correlation_id: str | None = None,
     ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeSubscriptionResult]:
         customer, bridge_config, request = self._build_request(
             customer_id=customer_id,
+            instance_id=instance_id,
             correlation_id=correlation_id,
         )
         checked_at = datetime.now(timezone.utc)
@@ -1845,7 +1961,7 @@ class CustomerBridgeService:
             )
             raise self._map_subscription_error(
                 customer=customer,
-                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                bridge_base_url=bridge_config.base_url_internal if bridge_config else None,
                 exc=exc,
             ) from exc
         if bridge_config is not None:
@@ -1859,10 +1975,12 @@ class CustomerBridgeService:
     def get_subscription_messages(
         self,
         customer_id: int,
+        instance_id: str | None = None,
         correlation_id: str | None = None,
     ) -> tuple[Customer, CustomerBridgeConfig | None, list[BridgeSubscriptionMessageResult]]:
         customer, bridge_config, request = self._build_request(
             customer_id=customer_id,
+            instance_id=instance_id,
             correlation_id=correlation_id,
         )
         try:
@@ -1875,7 +1993,7 @@ class CustomerBridgeService:
         ) as exc:
             raise self._map_bridge_error(
                 customer=customer,
-                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                bridge_base_url=bridge_config.base_url_internal if bridge_config else None,
                 exc=exc,
             ) from exc
         return customer, bridge_config, bridge_messages
@@ -1884,10 +2002,12 @@ class CustomerBridgeService:
         self,
         customer_id: int,
         payload: list[dict[str, object]],
+        instance_id: str | None = None,
         correlation_id: str | None = None,
     ) -> tuple[Customer, CustomerBridgeConfig | None, list[BridgeSubscriptionMessageResult]]:
         customer, bridge_config, request = self._build_request(
             customer_id=customer_id,
+            instance_id=instance_id,
             correlation_id=correlation_id,
         )
         try:
@@ -1903,7 +2023,7 @@ class CustomerBridgeService:
         ) as exc:
             raise self._map_bridge_error(
                 customer=customer,
-                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                bridge_base_url=bridge_config.base_url_internal if bridge_config else None,
                 exc=exc,
             ) from exc
         return customer, bridge_config, bridge_messages
@@ -1911,10 +2031,12 @@ class CustomerBridgeService:
     def get_subscription_config(
         self,
         customer_id: int,
+        instance_id: str | None = None,
         correlation_id: str | None = None,
     ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeSubscriptionConfigResult]:
         customer, bridge_config, request = self._build_request(
             customer_id=customer_id,
+            instance_id=instance_id,
             correlation_id=correlation_id,
         )
         checked_at = datetime.now(timezone.utc)
@@ -1933,7 +2055,7 @@ class CustomerBridgeService:
             )
             raise self._map_subscription_error(
                 customer=customer,
-                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                bridge_base_url=bridge_config.base_url_internal if bridge_config else None,
                 exc=exc,
             ) from exc
         if bridge_config is not None:
@@ -1948,10 +2070,12 @@ class CustomerBridgeService:
         self,
         customer_id: int,
         payload: dict[str, object],
+        instance_id: str | None = None,
         correlation_id: str | None = None,
     ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeSubscriptionConfigResult]:
         customer, bridge_config, request = self._build_request(
             customer_id=customer_id,
+            instance_id=instance_id,
             correlation_id=correlation_id,
         )
         checked_at = datetime.now(timezone.utc)
@@ -1973,7 +2097,7 @@ class CustomerBridgeService:
             )
             raise self._map_subscription_error(
                 customer=customer,
-                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                bridge_base_url=bridge_config.base_url_internal if bridge_config else None,
                 exc=exc,
             ) from exc
         if bridge_config is not None:
@@ -1987,8 +2111,12 @@ class CustomerBridgeService:
     def get_subscription(
         self,
         customer_id: int,
+        instance_id: str | None = None,
     ) -> tuple[Customer, CustomerBridgeConfig]:
-        customer, bridge_config = self._bridge_config_service.get_active(customer_id=customer_id)
+        customer, bridge_config = self._bridge_config_service.get_active(
+            customer_id=customer_id,
+            instance_id=instance_id,
+        )
         self._config_resolver.resolve(
             customer=customer,
             bridge_config=bridge_config,
@@ -2028,10 +2156,12 @@ class CustomerBridgeService:
     def refresh_subscription(
         self,
         customer_id: int,
+        instance_id: str | None = None,
         correlation_id: str | None = None,
     ) -> tuple[Customer, CustomerBridgeConfig | None]:
         customer, bridge_config, request = self._build_request(
             customer_id=customer_id,
+            instance_id=instance_id,
             correlation_id=correlation_id,
         )
         checked_at = datetime.now(timezone.utc)
@@ -2062,7 +2192,7 @@ class CustomerBridgeService:
                     )
             raise self._map_subscription_error(
                 customer=customer,
-                bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
+                bridge_base_url=bridge_config.base_url_internal if bridge_config else None,
                 exc=exc,
             ) from exc
         if bridge_config is not None:
@@ -2076,18 +2206,31 @@ class CustomerBridgeService:
     def _build_request(
         self,
         customer_id: int,
+        instance_id: str | None,
         correlation_id: str | None,
     ) -> tuple[Customer, CustomerBridgeConfig | None, BridgeRequest]:
-        customer, bridge_config = self._bridge_config_service.get_active(customer_id=customer_id)
+        customer, bridge_config = self._bridge_config_service.get_active(
+            customer_id=customer_id,
+            instance_id=instance_id,
+        )
         resolved_bridge_config = self._config_resolver.resolve(
             customer=customer,
             bridge_config=bridge_config,
         )
+        bridge_access_token = self._bridge_access_token_service.create_access_token(
+            customer_id=customer.id,
+            instance_id=resolved_bridge_config.instance_id,
+            tenant_id=resolved_bridge_config.tenant_id,
+            audience=resolved_bridge_config.audience,
+        )
         return customer, bridge_config, BridgeRequest(
-            base_url=resolved_bridge_config.base_url,
-            api_key=resolved_bridge_config.api_key,
+            base_url=resolved_bridge_config.base_url_internal,
+            access_token=bridge_access_token,
             timeout_seconds=resolved_bridge_config.timeout_seconds,
             correlation_id=correlation_id,
+            retry_count=resolved_bridge_config.retry_count,
+            retry_backoff_seconds=resolved_bridge_config.retry_backoff_seconds,
+            legacy_api_key=resolved_bridge_config.legacy_api_key,
         )
 
     def _map_bridge_error(
@@ -2336,11 +2479,13 @@ def get_customer_bridge_config_service(
 def get_customer_bridge_service(
     customer_bridge_config_service: CustomerBridgeConfigService = Depends(get_customer_bridge_config_service),
     bridge_client: BridgeClient = Depends(get_bridge_client),
+    bridge_access_token_service: BridgeAccessTokenService = Depends(get_bridge_access_token_service),
     settings: Settings = Depends(get_settings),
 ) -> CustomerBridgeService:
     return CustomerBridgeService(
         bridge_config_service=customer_bridge_config_service,
         bridge_client=bridge_client,
+        bridge_access_token_service=bridge_access_token_service,
         settings=settings,
     )
 
