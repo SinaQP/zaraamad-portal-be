@@ -92,7 +92,7 @@ class BridgeInvalidResponseError(BridgeClientError):
 
 class BridgeClient:
     _HEALTH_PATH = "/bridge/health"
-    _CAPABILITIES_PATH = "/bridge/capabilities"
+    _CAPABILITIES_PATH = "/internal-api/v1/bridge/capabilities"
     _ACTIVE_SUBSCRIPTION_PATH = "/sub/subscriptions/active/"
     _SUBSCRIPTION_MESSAGES_PATH = "/sub/subscriptions/messages/"
 
