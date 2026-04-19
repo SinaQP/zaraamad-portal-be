@@ -24,8 +24,19 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("JWT_SIGNING_KEY", "JWT_SECRET_KEY"),
     )
     jwt_algorithm: str = "HS256"
-    jwt_issuer: str = "zaraamad-django"
+    jwt_issuer: str = Field(
+        default="zaravand-portal",
+        validation_alias=AliasChoices("JWT_ISSUER", "PORTAL_BRIDGE_JWT_ISSUER"),
+    )
     jwt_audience: str | None = None
+    jwt_private_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("JWT_PRIVATE_KEY", "PORTAL_BRIDGE_JWT_PRIVATE_KEY"),
+    )
+    jwt_ttl_seconds: int = Field(
+        default=120,
+        validation_alias=AliasChoices("JWT_TTL_SECONDS", "PORTAL_BRIDGE_JWT_TTL_SECONDS"),
+    )
     jwt_access_token_expire_minutes: int = 60
     otp_expire_seconds: int = 120
     otp_request_limit_count: int = 3
@@ -91,6 +102,13 @@ class Settings(BaseSettings):
                 for origin in value
                 if isinstance(origin, str) and origin.strip()
             ]
+        return value
+
+    @field_validator("jwt_ttl_seconds")
+    @classmethod
+    def validate_jwt_ttl_seconds(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("JWT_TTL_SECONDS must be greater than zero.")
         return value
 
 

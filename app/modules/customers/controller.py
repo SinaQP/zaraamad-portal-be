@@ -23,6 +23,10 @@ from app.modules.customers.dtos import (
     CustomerUpdate,
 )
 from app.modules.customers.mappers import CustomerMapper, get_customer_mapper
+from app.modules.customers.portal_bridge_pilot_service import (
+    CustomerPortalBridgePilotService,
+    get_customer_portal_bridge_pilot_service,
+)
 from app.modules.customers.service import (
     CustomerBridgeService,
     CustomerBridgeConfigService,
@@ -474,6 +478,43 @@ def get_customer_bridge_config(
     return mapper.to_bridge_config_out(
         customer=customer,
         bridge_config=bridge_config,
+    )
+
+
+@router.get(
+    "/{customer_id}/bridge/pilot/ping",
+    tags=[CUSTOMER_BRIDGE_TAG],
+    response_model=dict[str, object],
+    summary="Proxy pilot Portal to Zaraamad request",
+    description=(
+        "Pilot endpoint for the minimal Portal to Zaraamad backend flow. "
+        "Portal resolves the Zaraamad target URL from the existing customer bridge row, "
+        "mints a short-lived RS256 JWT, and proxies one internal Zaraamad API call."
+    ),
+    responses={
+        200: {"description": "Pilot Zaraamad response returned."},
+        401: {"description": "Authentication required."},
+        403: {"description": "Customer access denied."},
+        404: {"description": "Customer or bridge target not found."},
+        502: {"description": "Zaraamad rejected the request or returned an invalid response."},
+        503: {"description": "Portal signing configuration is unavailable."},
+        504: {"description": "Zaraamad request timed out."},
+    },
+)
+def proxy_customer_bridge_pilot_ping(
+    customer_id: int,
+    x_correlation_id: str | None = Header(
+        default=None,
+        alias="X-Correlation-ID",
+        description="Optional correlation id forwarded to Zaraamad.",
+    ),
+    current_user: CurrentUser = Depends(get_current_user),
+    service: CustomerPortalBridgePilotService = Depends(get_customer_portal_bridge_pilot_service),
+) -> dict[str, object]:
+    return service.proxy_pilot_ping(
+        customer_id=customer_id,
+        current_user=current_user,
+        correlation_id=x_correlation_id,
     )
 
 
