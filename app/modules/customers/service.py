@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import Depends, HTTPException, status
+from jose import jwt
 from openpyxl import load_workbook
 from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.engine import make_url
@@ -402,8 +404,6 @@ class CustomerBridgeConfigService:
             .where(CustomerBridgeConfig.bridge_is_enabled.is_(True))
             .where(CustomerBridgeConfig.bridge_base_url.is_not(None))
             .where(CustomerBridgeConfig.bridge_base_url != "")
-            .where(CustomerBridgeConfig.bridge_api_key.is_not(None))
-            .where(CustomerBridgeConfig.bridge_api_key != "")
             .order_by(CustomerBridgeConfig.customer_id.asc())
         )
         return list(self._db_session.scalars(query).all())
@@ -1633,7 +1633,6 @@ class CustomerIncomeImportService:
 @dataclass(frozen=True)
 class ResolvedCustomerBridgeConfig:
     base_url: str
-    api_key: str
     timeout_seconds: int
 
 
@@ -1647,12 +1646,13 @@ class CustomerBridgeConfigResolver:
         bridge_config: CustomerBridgeConfig | None,
     ) -> ResolvedCustomerBridgeConfig:
         missing_fields: list[str] = []
+        normalized_base_url: str | None = None
         if bridge_config is None or not bridge_config.bridge_is_enabled:
             missing_fields.append("bridge_is_enabled")
-        if bridge_config is None or not bridge_config.bridge_base_url:
+        if bridge_config is not None and bridge_config.bridge_base_url:
+            normalized_base_url = bridge_config.bridge_base_url.strip().rstrip("/")
+        if bridge_config is None or not normalized_base_url:
             missing_fields.append("bridge_base_url")
-        if bridge_config is None or not bridge_config.bridge_api_key:
-            missing_fields.append("bridge_api_key")
         if missing_fields:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -1664,14 +1664,18 @@ class CustomerBridgeConfigResolver:
                     ),
                 },
             )
+        if normalized_base_url is None:
+            raise RuntimeError("Resolved bridge base URL is unexpectedly empty.")
         return ResolvedCustomerBridgeConfig(
-            base_url=bridge_config.bridge_base_url,
-            api_key=bridge_config.bridge_api_key,
+            base_url=normalized_base_url,
             timeout_seconds=self._settings.bridge_request_timeout_seconds,
         )
 
 
 class CustomerBridgeService:
+    _PORTAL_BRIDGE_ALGORITHM = "RS256"
+    _PORTAL_BRIDGE_SUBJECT = "service:portal-bridge"
+
     def __init__(
         self,
         bridge_config_service: CustomerBridgeConfigService,
@@ -1680,6 +1684,7 @@ class CustomerBridgeService:
     ) -> None:
         self._bridge_config_service = bridge_config_service
         self._bridge_client = bridge_client
+        self._settings = settings
         self._config_resolver = CustomerBridgeConfigResolver(settings=settings)
 
     def get_health(
@@ -2083,12 +2088,68 @@ class CustomerBridgeService:
             customer=customer,
             bridge_config=bridge_config,
         )
+        signing_private_key = self._require_signing_private_key()
+        bridge_id = str(customer.id)
+        portal_token = self._create_portal_bridge_token(
+            customer_id=customer.id,
+            bridge_id=bridge_id,
+            signing_private_key=signing_private_key,
+        )
         return customer, bridge_config, BridgeRequest(
             base_url=resolved_bridge_config.base_url,
-            api_key=resolved_bridge_config.api_key,
+            bearer_token=portal_token,
             timeout_seconds=resolved_bridge_config.timeout_seconds,
             correlation_id=correlation_id,
         )
+
+    def _require_signing_private_key(self) -> str:
+        private_key = (self._settings.jwt_private_key or "").strip()
+        if not private_key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "message": CUSTOMER_BRIDGE_REQUEST_FAILED,
+                    "developer_message": (
+                        "Missing required JWT_PRIVATE_KEY configuration for Portal to Zaraamad signing."
+                    ),
+                },
+            )
+        return private_key.replace("\\n", "\n")
+
+    def _create_portal_bridge_token(
+        self,
+        *,
+        customer_id: int,
+        bridge_id: str,
+        signing_private_key: str,
+    ) -> str:
+        now = datetime.now(UTC)
+        payload: dict[str, str | int] = {
+            "iss": self._settings.jwt_issuer,
+            "sub": self._PORTAL_BRIDGE_SUBJECT,
+            "bridge_id": bridge_id,
+            "customer_id": str(customer_id),
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(seconds=self._settings.jwt_ttl_seconds)).timestamp()),
+            "jti": str(uuid4()),
+        }
+        try:
+            return jwt.encode(
+                payload,
+                signing_private_key,
+                algorithm=self._PORTAL_BRIDGE_ALGORITHM,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "message": CUSTOMER_BRIDGE_REQUEST_FAILED,
+                    "developer_message": (
+                        "Portal bridge JWT signing failed. "
+                        f"Verify JWT_PRIVATE_KEY RS256 private key format. Error: {exc}"
+                    ),
+                },
+            ) from exc
 
     def _map_bridge_error(
         self,

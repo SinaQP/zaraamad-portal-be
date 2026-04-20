@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class BridgeRequest:
     base_url: str
-    api_key: str
+    bearer_token: str
     timeout_seconds: int
     correlation_id: str | None = None
 
@@ -359,7 +359,7 @@ class BridgeClient:
         base_url = request.base_url.rstrip("/")
         headers = {
             "Accept": "application/json",
-            "X-Bridge-Key": request.api_key,
+            "Authorization": f"Bearer {request.bearer_token}",
         }
         if request.correlation_id:
             headers["X-Correlation-ID"] = request.correlation_id
@@ -472,7 +472,7 @@ class BridgeClient:
     def _sanitize_headers(self, headers: dict[str, str]) -> dict[str, str]:
         sanitized_headers = dict(headers)
         for key in list(sanitized_headers):
-            if key.lower() == "x-bridge-key":
+            if key.lower() == "authorization":
                 sanitized_headers[key] = self._mask_secret(sanitized_headers[key])
         return sanitized_headers
 

@@ -24,7 +24,6 @@ class CustomerBridgeConfig(Base, TimestampMixin):
         primary_key=True,
     )
     bridge_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    bridge_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     bridge_is_enabled: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

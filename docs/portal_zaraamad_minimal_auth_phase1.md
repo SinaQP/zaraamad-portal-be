@@ -4,10 +4,11 @@
 
 - User authenticates only with Portal.
 - Frontend calls only Portal APIs.
-- Portal proxies one pilot call to Zaraamad: `GET /internal/portal/pilot/ping`.
+- Portal proxies the pilot call to Zaraamad: `GET /internal-api/v1/bridge/capabilities`.
 - Portal resolves target Zaraamad instance from existing Bridge table (`customer_bridge_configs`) using `customer_id`.
 - Portal mints a short-lived RS256 JWT per request and sends it as `Authorization: Bearer <token>` to Zaraamad.
 - Zaraamad validates the Portal JWT on the pilot endpoint and does not require a separate Zaraamad user login/session.
+- Bridge shared secrets (`X-Bridge-Key`) are removed from Portal -> Zaraamad requests.
 
 ## Bridge Usage in This Phase
 
@@ -71,7 +72,7 @@ Portal signer config for this phase:
 - Portal JWT signing private keys.
 - User authentication state or sessions.
 - Zaraamad business logic.
-- A shared secret that treats Zaraamad as one global target.
+- A shared bridge secret (`bridge_api_key` / `X-Bridge-Key`).
 
 ## Intentionally Postponed
 

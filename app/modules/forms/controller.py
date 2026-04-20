@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
-from app.common.security.dependencies import require_admin, require_admin_or_bridge_access
+from app.common.security.dependencies import require_admin
 
 from app.modules.forms.constants import FormScopeType
 from app.modules.forms.dtos import (
@@ -28,7 +28,7 @@ router = APIRouter()
 forms_router = APIRouter(
     prefix="/api/forms",
     tags=[FORMS_TAG],
-    dependencies=[Depends(require_admin_or_bridge_access)],
+    dependencies=[Depends(require_admin)],
 )
 forms_admin_router = APIRouter(
     prefix="/api/admin",
@@ -43,12 +43,12 @@ forms_admin_router = APIRouter(
     summary="List forms",
     description=(
         "Return form schemas with nested fields and optional scope filtering. "
-        "Accessible by admin users or bridge-authenticated clients."
+        "Only admin users can access this endpoint."
     ),
     responses={
         200: {"description": "Form schemas returned."},
-        401: {"description": "Authorization bearer token or valid X-Bridge-Key is required."},
-        403: {"description": "Admin access required for JWT-authenticated users."},
+        401: {"description": "Authorization bearer token is required."},
+        403: {"description": "Admin access required."},
     },
 )
 def list_forms(
@@ -77,13 +77,13 @@ def list_forms(
     description=(
         "Resolve the active municipality-scoped form for the provided municipality code, "
         "then fallback to the active global form with the same key. "
-        "Accessible by admin users or bridge-authenticated clients."
+        "Only admin users can access this endpoint."
     ),
     responses={
         200: {"description": "Resolved form returned."},
         404: {"description": "Form was not found."},
-        401: {"description": "Authorization bearer token or valid X-Bridge-Key is required."},
-        403: {"description": "Admin access required for JWT-authenticated users."},
+        401: {"description": "Authorization bearer token is required."},
+        403: {"description": "Admin access required."},
     },
 )
 def resolve_form(
@@ -105,12 +105,12 @@ def resolve_form(
     summary="Get forms by key",
     description=(
         "Return active form schemas for the provided key and optional scope filters. "
-        "Accessible by admin users or bridge-authenticated clients."
+        "Only admin users can access this endpoint."
     ),
     responses={
         200: {"description": "Matching forms returned."},
-        401: {"description": "Authorization bearer token or valid X-Bridge-Key is required."},
-        403: {"description": "Admin access required for JWT-authenticated users."},
+        401: {"description": "Authorization bearer token is required."},
+        403: {"description": "Admin access required."},
     },
 )
 def get_forms_by_key(

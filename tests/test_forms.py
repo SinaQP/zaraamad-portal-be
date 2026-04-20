@@ -4,8 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.common.config import get_settings
-from app.common.messages import ADMIN_ACCESS_REQUIRED, MISSING_ACCESS_CREDENTIALS, MISSING_AUTH_TOKEN
+from app.common.messages import ADMIN_ACCESS_REQUIRED, MISSING_AUTH_TOKEN
 from app.common.enums import UserRole
 from app.modules.forms.constants import FormBindingType, FormFieldType, FormScopeType
 from app.modules.forms.schemas import FormField, FormSchema
@@ -87,10 +86,6 @@ def _create_user(
     return user
 
 
-def _bridge_headers() -> dict[str, str]:
-    return {"X-Bridge-Key": get_settings().bridge_api_key}
-
-
 def test_form_schema_unique_constraint_handles_global_scope_value_null(db_session: Session) -> None:
     _create_form(
         db_session,
@@ -169,8 +164,17 @@ def test_forms_endpoint_returns_nested_sub_fields(client: TestClient, db_session
         field_type=FormFieldType.FLOOR_AREA,
         order_index=20,
     )
+    admin_user = _create_user(
+        db_session,
+        role=UserRole.ADMIN,
+        mobile="09121119991",
+        full_name="Admin Reader 1",
+    )
 
-    response = client.get("/api/forms/nested-form/", headers=_bridge_headers())
+    response = client.get(
+        "/api/forms/nested-form/",
+        headers=auth_headers_for_user(admin_user),
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -218,10 +222,16 @@ def test_resolved_form_falls_back_to_global_when_municipality_form_missing(
         scope_value="sirjan",
         is_active=False,
     )
+    admin_user = _create_user(
+        db_session,
+        role=UserRole.ADMIN,
+        mobile="09121119992",
+        full_name="Admin Reader 2",
+    )
 
     response = client.get(
         "/api/forms/shared-form/resolved/?municipality_code=sirjan",
-        headers=_bridge_headers(),
+        headers=auth_headers_for_user(admin_user),
     )
 
     assert response.status_code == 200
@@ -247,9 +257,15 @@ def test_resolved_form_uses_query_param_municipality_scope(
         scope_type=FormScopeType.MUNICIPALITY,
         scope_value="sirjan",
     )
+    admin_user = _create_user(
+        db_session,
+        role=UserRole.ADMIN,
+        mobile="09121119993",
+        full_name="Admin Reader 3",
+    )
     response = client.get(
         "/api/forms/resolved-form/resolved/?municipality_code=sirjan",
-        headers=_bridge_headers(),
+        headers=auth_headers_for_user(admin_user),
     )
 
     assert response.status_code == 200
@@ -302,7 +318,7 @@ def test_seed_service_is_idempotent_and_removes_obsolete_fields(db_session: Sess
         "/api/forms/protected-form/resolved/?municipality_code=sirjan",
     ],
 )
-def test_form_read_routes_require_admin_or_bridge_access(
+def test_form_read_routes_require_admin_auth(
     client: TestClient,
     db_session: Session,
     path: str,
@@ -318,7 +334,7 @@ def test_form_read_routes_require_admin_or_bridge_access(
     response = client.get(path)
 
     assert response.status_code == 401
-    assert response.json()["message"] == MISSING_ACCESS_CREDENTIALS
+    assert response.json()["message"] == MISSING_AUTH_TOKEN
 
 
 @pytest.mark.parametrize(
@@ -394,7 +410,7 @@ def test_admin_can_access_form_read_routes(
         "/api/forms/protected-form/resolved/?municipality_code=sirjan",
     ],
 )
-def test_bridge_key_can_access_form_read_routes(
+def test_bridge_key_header_cannot_access_form_read_routes(
     client: TestClient,
     db_session: Session,
     path: str,
@@ -409,10 +425,11 @@ def test_bridge_key_can_access_form_read_routes(
 
     response = client.get(
         path,
-        headers=_bridge_headers(),
+        headers={"X-Bridge-Key": "any-value"},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 401
+    assert response.json()["message"] == MISSING_AUTH_TOKEN
 
 
 def test_form_admin_routes_require_admin_auth_and_reject_bridge_key(
@@ -437,7 +454,7 @@ def test_form_admin_routes_require_admin_auth_and_reject_bridge_key(
     bridge_response = client.post(
         "/api/admin/forms/",
         json=payload,
-        headers=_bridge_headers(),
+        headers={"X-Bridge-Key": "any-value"},
     )
 
     assert bridge_response.status_code == 401

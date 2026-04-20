@@ -31,3 +31,9 @@ globs: ["app/**/*.py"]
 - Do NOT create new endpoints, routes, modules, background jobs, or extra features unless explicitly requested by the user.
 - Implement only what is directly asked.
 - If a requirement is missing, implement the smallest compliant change and leave a clear TODO comment rather than inventing behavior.
+
+## Mini-doc workflow (mandatory)
+- Before changing code in any feature area, read the related mini-documentation in `docs/agent-mini-docs/` for that area.
+- If the related mini-document does not exist yet, create a concise one before or together with the first change in that area.
+- After every code change, update the same mini-document so it matches the new behavior, contracts, and constraints.
+- Do not leave code and mini-documentation out of sync.

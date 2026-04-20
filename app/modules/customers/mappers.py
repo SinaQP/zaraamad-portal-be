@@ -48,7 +48,6 @@ class CustomerMapper:
             customer_name=customer.name,
             bridge_base_url=bridge_config.bridge_base_url if bridge_config else None,
             bridge_is_enabled=bridge_config.bridge_is_enabled if bridge_config else False,
-            bridge_has_api_key=bool(bridge_config and bridge_config.bridge_api_key),
             last_online_status=bridge_config.last_online_status if bridge_config else None,
             last_health_checked_at=bridge_config.last_health_checked_at if bridge_config else None,
             last_health_error=bridge_config.last_health_error if bridge_config else None,

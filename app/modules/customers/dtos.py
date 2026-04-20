@@ -22,15 +22,6 @@ class CustomerBridgeConfigNormalizer(MongoDTO):
         normalized_value = value.strip().rstrip("/")
         return normalized_value or None
 
-    @field_validator("bridge_api_key", check_fields=False)
-    @classmethod
-    def normalize_bridge_api_key(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized_value = value.strip()
-        return normalized_value or None
-
-
 class CustomerDatabaseConnectionNormalizer(MongoDTO):
     @field_validator(
         "connection_string",
@@ -251,11 +242,6 @@ class CustomerBridgeConfigUpdate(CustomerBridgeConfigNormalizer):
         description="Customer bridge base URL.",
         examples=["https://tehran.example.com"],
     )
-    bridge_api_key: str | None = Field(
-        default=None,
-        description="Shared secret used for bridge requests.",
-        examples=["bridge-secret"],
-    )
     bridge_is_enabled: bool | None = Field(
         default=None,
         description="Whether customer bridge access is enabled.",
@@ -280,11 +266,6 @@ class CustomerBridgeConfigOut(MongoDTO):
     bridge_is_enabled: bool = Field(
         ...,
         description="Whether bridge access is enabled for this customer.",
-        examples=[True],
-    )
-    bridge_has_api_key: bool = Field(
-        ...,
-        description="Whether the customer bridge API key is configured.",
         examples=[True],
     )
     last_online_status: bool | None = Field(

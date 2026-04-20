@@ -1,7 +1,10 @@
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+import pytest
 from sqlalchemy.orm import Session
 
+import app.modules.customers.service as customer_service_module
+from app.common.config import get_settings
 from app.common.enums import UserRole
 from app.common.messages import (
     CUSTOMER_BRIDGE_AUTH_FAILED,
@@ -25,6 +28,24 @@ from app.common.services.bridge_client import (
 from app.main import app
 from app.modules.users.schemas import User
 from tests.auth_utils import token_for_mobile
+
+
+@pytest.fixture(autouse=True)
+def _configure_bridge_jwt(monkeypatch):
+    monkeypatch.setenv(
+        "JWT_PRIVATE_KEY",
+        "-----BEGIN PRIVATE KEY-----\\nmock-key\\n-----END PRIVATE KEY-----",
+    )
+    monkeypatch.setenv("JWT_ISSUER", "zaravand-portal")
+    monkeypatch.setenv("JWT_TTL_SECONDS", "120")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        customer_service_module.CustomerBridgeService,
+        "_create_portal_bridge_token",
+        lambda self, customer_id, bridge_id, signing_private_key: "signed-bridge-token",
+    )
+    yield
+    get_settings.cache_clear()
 
 
 class RecordingBridgeClient:
@@ -395,7 +416,6 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
         "customer_name": "Tehran Customer",
         "bridge_base_url": None,
         "bridge_is_enabled": False,
-        "bridge_has_api_key": False,
         "last_online_status": None,
         "last_health_checked_at": None,
         "last_health_error": None,
@@ -406,7 +426,6 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
         headers=headers,
         json={
             "bridge_base_url": "https://tehran.example.com/",
-            "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
@@ -416,7 +435,6 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
         "customer_name": "Tehran Customer",
         "bridge_base_url": "https://tehran.example.com",
         "bridge_is_enabled": True,
-        "bridge_has_api_key": True,
         "last_online_status": None,
         "last_health_checked_at": None,
         "last_health_error": None,
@@ -465,7 +483,7 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
             "health",
             BridgeRequest(
                 base_url="https://tehran.example.com",
-                api_key="bridge-secret",
+                bearer_token="signed-bridge-token",
                 timeout_seconds=10,
                 correlation_id="corr-refresh",
             ),
@@ -474,7 +492,7 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
             "health",
             BridgeRequest(
                 base_url="https://tehran.example.com",
-                api_key="bridge-secret",
+                bearer_token="signed-bridge-token",
                 timeout_seconds=10,
                 correlation_id="corr-123",
             ),
@@ -483,7 +501,7 @@ def test_customer_bridge_health_and_capabilities_use_customer_configuration(
             "capabilities",
             BridgeRequest(
                 base_url="https://tehran.example.com",
-                api_key="bridge-secret",
+                bearer_token="signed-bridge-token",
                 timeout_seconds=10,
                 correlation_id=None,
             ),
@@ -515,7 +533,6 @@ def test_customer_bridge_subscription_uses_customer_configuration(
         headers=headers,
         json={
             "bridge_base_url": "https://subscription.example.com/",
-            "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
@@ -538,7 +555,7 @@ def test_customer_bridge_subscription_uses_customer_configuration(
         "subscription",
         BridgeRequest(
             base_url="https://subscription.example.com",
-            api_key="bridge-secret",
+            bearer_token="signed-bridge-token",
             timeout_seconds=10,
             correlation_id="corr-subscription",
         ),
@@ -594,7 +611,6 @@ def test_customer_bridge_subscription_config_fetch_and_sync_use_customer_configu
         headers=headers,
         json={
             "bridge_base_url": "https://subscription.example.com/",
-            "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
@@ -676,7 +692,7 @@ def test_customer_bridge_subscription_config_fetch_and_sync_use_customer_configu
             "subscription-config",
             BridgeRequest(
                 base_url="https://subscription.example.com",
-                api_key="bridge-secret",
+                bearer_token="signed-bridge-token",
                 timeout_seconds=10,
                 correlation_id="corr-config",
             ),
@@ -685,7 +701,7 @@ def test_customer_bridge_subscription_config_fetch_and_sync_use_customer_configu
             "subscription-config-sync",
             BridgeRequest(
                 base_url="https://subscription.example.com",
-                api_key="bridge-secret",
+                bearer_token="signed-bridge-token",
                 timeout_seconds=10,
                 correlation_id="corr-sync",
             ),
@@ -734,7 +750,6 @@ def test_customer_bridge_subscription_maps_missing_upstream_subscription_to_not_
         headers=headers,
         json={
             "bridge_base_url": "https://subscription.example.com/",
-            "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
@@ -753,7 +768,7 @@ def test_customer_bridge_subscription_maps_missing_upstream_subscription_to_not_
         "subscription",
         BridgeRequest(
             base_url="https://subscription.example.com",
-            api_key="bridge-secret",
+            bearer_token="signed-bridge-token",
             timeout_seconds=10,
             correlation_id=None,
         ),
@@ -783,7 +798,6 @@ def test_customer_bridge_subscription_surfaces_upstream_error_details_for_debugg
         headers=headers,
         json={
             "bridge_base_url": "https://subscription.example.com/",
-            "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
@@ -821,7 +835,6 @@ def test_customer_bridge_refresh_status_caches_offline_result_without_failing(
         headers=headers,
         json={
             "bridge_base_url": "https://mashhad.example.com",
-            "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
@@ -869,7 +882,6 @@ def test_customer_bridge_health_maps_unavailable_bridge_to_service_unavailable(
         headers=headers,
         json={
             "bridge_base_url": "https://karaj.example.com",
-            "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
@@ -915,7 +927,6 @@ def test_customer_bridge_capabilities_maps_unauthorized_bridge_to_bad_gateway(
         headers=headers,
         json={
             "bridge_base_url": "https://shiraz.example.com",
-            "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
@@ -952,7 +963,6 @@ def test_customer_bridge_subscription_config_maps_unauthorized_bridge_to_bad_gat
         headers=headers,
         json={
             "bridge_base_url": "https://tabriz.example.com",
-            "bridge_api_key": "bridge-secret",
             "bridge_is_enabled": True,
         },
     )
@@ -977,3 +987,4 @@ def test_local_subscription_routes_are_not_exposed() -> None:
     assert "/sub/subscription/" not in route_paths
     assert "/sub/subscriptions/active/" not in route_paths
     assert "/sub/subscriptions/messages/" not in route_paths
+

@@ -122,7 +122,6 @@ Key environment variables:
 - `JWT_PRIVATE_KEY`: RS256 private key used only for Portal -> Zaraamad backend JWT signing
 - `JWT_TTL_SECONDS`: short TTL for Portal -> Zaraamad JWT, default `120`
 - `JWT_AUDIENCE`: optional audience claim to verify when set
-- `BRIDGE_API_KEY`: shared secret used for bridge-authenticated API access
 - `CUSTOMER_CONNECTION_SECRET_KEY`: Fernet-compatible master key used to encrypt stored customer database connection strings
 - `SMS_PANEL_ORGANIZATION`: SMS panel organization
 - `SMS_PANEL_USERNAME`: SMS panel username
@@ -346,12 +345,11 @@ Forms:
 
 ### Access
 
-Form schema read endpoints require either:
+Form schema read endpoints require:
 
 - `Authorization: Bearer <admin-token>`
-- `X-Bridge-Key: <shared-bridge-key>`
 
-Form management endpoints under `/api/admin` require an admin bearer token and do not accept bridge-only access.
+Form management endpoints under `/api/admin` also require an admin bearer token.
 
 ## Portal -> Zaraamad Pilot Auth
 
@@ -370,6 +368,12 @@ Manual setup required for local/dev:
 `bridge_is_enabled=true`
 `bridge_base_url=<zaraamad-internal-base-url>`
 5. Call `GET /customers/{customer_id}/bridge/pilot/ping` from frontend through Portal only.
+
+## Agent Mini-Docs
+
+- Agent operating rules: `AGENTS.md`
+- Engineering rule set: `agent-rules/engineering/RULE.md`
+- Customer bridge auth mini-doc: `docs/agent-mini-docs/customer-bridge-auth.md`
 
 ### Resolution
 
@@ -476,7 +480,7 @@ Pagination metadata is returned in response headers:
 - disabled or inactive customer service configs cannot be selected in a purchase
 - selected response timestamps are returned as Jalali datetime strings for `feedback.created_at`, `customers.updated_at`, and `customer-service-configs.updated_at`
 - customer service selection snapshot responses return Jalali `date` plus snapshot `time` in `HH:MM:SS` format
-- customer bridge subscription management resolves the configured `bridge_base_url` and `bridge_api_key` from the requested customer
+- customer bridge subscription management resolves the configured `bridge_base_url` from the requested customer and authenticates upstream with short-lived Portal RS256 JWTs
 - subscription bridge date fields use Jalali datetime strings in `YYYY-MM-DD HH:MM:SS` format
 
 Service catalog hierarchy:

@@ -52,13 +52,11 @@ def _create_bridge_config(
     customer_id: int,
     base_url: str,
     is_enabled: bool = True,
-    api_key: str | None = None,
 ) -> CustomerBridgeConfig:
     bridge_config = CustomerBridgeConfig(
         customer_id=customer_id,
         bridge_base_url=base_url,
         bridge_is_enabled=is_enabled,
-        bridge_api_key=api_key,
     )
     db_session.add(bridge_config)
     db_session.commit()
@@ -98,7 +96,6 @@ def test_customer_bridge_pilot_proxy_uses_bridge_base_url_and_minimal_portal_cla
         db_session=db_session,
         customer_id=customer.id,
         base_url="https://customer-one.internal /",
-        api_key=None,
     )
     user = _create_customer_user(
         db_session=db_session,
@@ -235,7 +232,7 @@ def test_customer_bridge_pilot_proxy_fails_fast_when_private_key_missing(
     db_session: Session,
     monkeypatch,
 ) -> None:
-    monkeypatch.delenv("JWT_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("JWT_PRIVATE_KEY", "")
     get_settings.cache_clear()
 
     customer = _create_customer(db_session=db_session, name="Missing Key Customer")

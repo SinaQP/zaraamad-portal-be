@@ -45,7 +45,6 @@ class Settings(BaseSettings):
     sms_api_url: str = "https://payamsms.com/services/rest/index.php"
     sms_request_timeout_seconds: int = 15
     bridge_request_timeout_seconds: int = 10
-    bridge_api_key: str = "change-me-bridge-key"
     customer_connection_secret_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
