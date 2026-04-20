@@ -5,7 +5,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit, urlunsplit
+from urllib.request import ProxyHandler, Request, build_opener, getproxies_environment, urlopen
 from uuid import uuid4
 
 from fastapi import Depends, HTTPException, status
@@ -110,12 +111,14 @@ class CustomerPortalBridgePilotService:
         bridge_config: CustomerBridgeConfig | None,
     ) -> str:
         missing_fields: list[str] = []
+        normalized_base_url: str | None = None
         if bridge_config is None:
             missing_fields.extend(["bridge_is_enabled", "bridge_base_url"])
         else:
             if not bridge_config.bridge_is_enabled:
                 missing_fields.append("bridge_is_enabled")
-            if not bridge_config.bridge_base_url:
+            normalized_base_url = self._normalize_bridge_base_url(bridge_config.bridge_base_url)
+            if not normalized_base_url:
                 missing_fields.append("bridge_base_url")
         if missing_fields:
             raise HTTPException(
@@ -128,7 +131,9 @@ class CustomerPortalBridgePilotService:
                     ),
                 },
             )
-        return bridge_config.bridge_base_url.rstrip("/")
+        if normalized_base_url is None:
+            raise RuntimeError("Resolved bridge base URL is unexpectedly empty.")
+        return normalized_base_url
 
     def _require_signing_private_key(self) -> str:
         private_key = (self._settings.jwt_private_key or "").strip()
@@ -204,7 +209,7 @@ class CustomerPortalBridgePilotService:
             method="GET",
         )
         try:
-            with urlopen(request, timeout=self._settings.bridge_request_timeout_seconds) as response:
+            with self._open_bridge_request(request=request) as response:
                 raw_response = self._decode_body(response.read())
                 upstream_status = int(getattr(response, "status", status.HTTP_200_OK))
         except TimeoutError as exc:
@@ -342,6 +347,51 @@ class CustomerPortalBridgePilotService:
                 },
             )
         return payload, upstream_status
+
+    def _normalize_bridge_base_url(self, value: str | None) -> str | None:
+        if value is None:
+            return None
+        raw_value = value.strip()
+        if not raw_value:
+            return None
+        try:
+            parsed = urlsplit(raw_value)
+        except ValueError:
+            return None
+        scheme = parsed.scheme.strip().lower()
+        netloc = parsed.netloc.strip()
+        if scheme not in {"http", "https"} or not netloc:
+            return None
+        normalized_path = parsed.path.rstrip("/")
+        normalized = urlunsplit((scheme, netloc, normalized_path, "", ""))
+        normalized = normalized.rstrip("/")
+        return normalized or None
+
+    def _open_bridge_request(self, *, request: Request):
+        timeout_seconds = self._settings.bridge_request_timeout_seconds
+        if self._has_http_proxy_in_environment():
+            direct_opener = build_opener(ProxyHandler({}))
+            try:
+                response = direct_opener.open(request, timeout=timeout_seconds)
+                logger.info(
+                    "Portal Zaraamad pilot proxy used direct connection bypassing environment proxy settings target_url=%s",
+                    request.full_url,
+                )
+                return response
+            except (TimeoutError, URLError, OSError) as exc:
+                logger.warning(
+                    "Portal Zaraamad pilot proxy direct connection failed; retrying with environment proxy settings target_url=%s error=%s",
+                    request.full_url,
+                    exc,
+                )
+        return urlopen(request, timeout=timeout_seconds)
+
+    def _has_http_proxy_in_environment(self) -> bool:
+        proxies = getproxies_environment()
+        return any(
+            name.lower() in {"http", "https"} and str(value).strip()
+            for name, value in proxies.items()
+        )
 
     def _decode_body(self, value: bytes | str) -> str:
         if isinstance(value, bytes):

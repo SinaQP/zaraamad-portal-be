@@ -97,7 +97,7 @@ def test_customer_bridge_pilot_proxy_uses_bridge_base_url_and_minimal_portal_cla
     _create_bridge_config(
         db_session=db_session,
         customer_id=customer.id,
-        base_url="https://customer-one.internal/",
+        base_url="https://customer-one.internal /",
         api_key=None,
     )
     user = _create_customer_user(
