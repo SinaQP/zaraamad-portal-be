@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 class CustomerPortalBridgePilotService:
     _PORTAL_BRIDGE_ALGORITHM = "RS256"
-    _PILOT_ENDPOINT_PATH = "/internal/portal/pilot/ping"
+    _PILOT_ENDPOINT_PATH = "/internal-api/v1/bridge/capabilities"
 
     def __init__(
         self,

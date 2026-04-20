@@ -105,6 +105,7 @@ def test_customer_bridge_pilot_proxy_uses_bridge_base_url_and_minimal_portal_cla
         customer_id=customer.id,
         mobile="09126667788",
     )
+    user_auth_headers = auth_headers_for_user(user)
 
     captured_signing: dict[str, Any] = {}
     captured_upstream: dict[str, Any] = {}
@@ -135,7 +136,7 @@ def test_customer_bridge_pilot_proxy_uses_bridge_base_url_and_minimal_portal_cla
     response = client.get(
         f"/customers/{customer.id}/bridge/pilot/ping",
         headers={
-            **auth_headers_for_user(user),
+            **user_auth_headers,
             "X-Correlation-ID": "pilot-corr-001",
         },
     )
@@ -146,7 +147,10 @@ def test_customer_bridge_pilot_proxy_uses_bridge_base_url_and_minimal_portal_cla
         "service": "zaraamad-be",
         "source": "portal-jwt",
     }
-    assert captured_upstream["url"] == "https://customer-one.internal/internal/portal/pilot/ping"
+    assert (
+        captured_upstream["url"]
+        == "https://customer-one.internal/internal-api/v1/bridge/capabilities"
+    )
     assert captured_upstream["timeout"] == 10
     assert captured_upstream["headers"]["accept"] == "application/json"
     assert captured_upstream["headers"]["authorization"] == "Bearer signed-portal-token"
@@ -279,6 +283,7 @@ def test_customer_bridge_pilot_proxy_maps_timeout_to_gateway_timeout(
         customer_id=customer.id,
         mobile="09126667792",
     )
+    user_auth_headers = auth_headers_for_user(user)
 
     monkeypatch.setattr(
         pilot_service_module.jwt,
@@ -294,7 +299,7 @@ def test_customer_bridge_pilot_proxy_maps_timeout_to_gateway_timeout(
 
     response = client.get(
         f"/customers/{customer.id}/bridge/pilot/ping",
-        headers=auth_headers_for_user(user),
+        headers=user_auth_headers,
     )
 
     assert response.status_code == 504
