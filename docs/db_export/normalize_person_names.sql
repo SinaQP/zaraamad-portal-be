@@ -14,7 +14,7 @@ SET XACT_ABORT ON;
     Set @ApplyChanges = 1 only after reviewing the preview output.
 */
 
-DECLARE @ApplyChanges bit = 0;
+DECLARE @ApplyChanges bit = 1;
 DECLARE @BatchSize int = 500;
 
 DECLARE @TextReplacements TABLE (
@@ -140,21 +140,14 @@ BEGIN TRY
     CREATE UNIQUE CLUSTERED INDEX [IX_NormalizedPersons_Id]
         ON #NormalizedPersons ([Id]);
 
-    SELECT COUNT_BIG(1) AS [RowsToUpdate]
-    FROM #NormalizedPersons;
-
-    SELECT TOP (50)
-        [Id],
-        [OldFirstName],
-        [NewFirstName],
-        [OldLastName],
-        [NewLastName]
-    FROM #NormalizedPersons
-    ORDER BY [Id];
+    DECLARE @RowsToUpdate bigint = (
+        SELECT COUNT_BIG(1)
+        FROM #NormalizedPersons
+    );
+    DECLARE @UpdatedRows bigint = 0;
 
     IF @ApplyChanges = 1
     BEGIN
-        DECLARE @UpdatedRows bigint = 0;
         DECLARE @BatchRows int = 1;
 
         WHILE @BatchRows > 0
@@ -194,13 +187,41 @@ BEGIN TRY
 
             SET @UpdatedRows = @UpdatedRows + @BatchRows;
         END;
-
-        SELECT @UpdatedRows AS [UpdatedRows];
-    END
-    ELSE
-    BEGIN
-        SELECT CAST(0 AS int) AS [UpdatedRows];
     END;
+
+    ;WITH PreviewRows AS (
+        SELECT TOP (50)
+            ROW_NUMBER() OVER (ORDER BY [Id]) AS [PreviewRowNumber],
+            CONVERT(nvarchar(100), [Id]) AS [Id],
+            [OldFirstName],
+            [NewFirstName],
+            [OldLastName],
+            [NewLastName]
+        FROM #NormalizedPersons
+        ORDER BY [Id]
+    )
+    SELECT
+        @RowsToUpdate AS [RowsToUpdate],
+        @UpdatedRows AS [UpdatedRows],
+        [PreviewRowNumber],
+        [Id],
+        [OldFirstName],
+        [NewFirstName],
+        [OldLastName],
+        [NewLastName]
+    FROM PreviewRows
+    UNION ALL
+    SELECT
+        @RowsToUpdate AS [RowsToUpdate],
+        @UpdatedRows AS [UpdatedRows],
+        CAST(NULL AS bigint) AS [PreviewRowNumber],
+        CAST(NULL AS nvarchar(100)) AS [Id],
+        CAST(NULL AS nvarchar(60)) AS [OldFirstName],
+        CAST(NULL AS nvarchar(60)) AS [NewFirstName],
+        CAST(NULL AS nvarchar(60)) AS [OldLastName],
+        CAST(NULL AS nvarchar(60)) AS [NewLastName]
+    WHERE NOT EXISTS (SELECT 1 FROM PreviewRows)
+    ORDER BY [PreviewRowNumber];
 END TRY
 BEGIN CATCH
     IF @@TRANCOUNT > 0

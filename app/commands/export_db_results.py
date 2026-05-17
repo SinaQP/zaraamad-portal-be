@@ -51,6 +51,9 @@ SQL_BLOCK_COMMENT_PATTERN = re.compile(r"/\*.*?\*/", re.DOTALL)
 SQL_LINE_COMMENT_PATTERN = re.compile(r"--[^\r\n]*")
 SQL_STRING_LITERAL_PATTERN = re.compile(r"N?'(?:''|[^'])*'")
 SQL_TOKEN_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+SCAN_STATUS_QUERY_OK = "ok"
+SCAN_STATUS_NO_ROWS = "no_rows"
+SCAN_STATUS_WRITE_OK = "write_ok"
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,13 @@ class ExportSummary:
     success_count: int
     error_count: int
     output_path: Path
+
+
+@dataclass(frozen=True)
+class QueryExecutionPayload:
+    columns: list[str]
+    rows: Iterator[Sequence[Any]] | None
+    affected_row_count: int | None
 
 
 class ServerInputReader:
@@ -242,20 +252,35 @@ class SqlServerConnector:
             engine.dispose()
 
     @contextmanager
-    def stream_query_rows(
+    def execute_query(
         self,
         *,
         server: ServerTarget,
         database_name: str,
         query: str,
-    ) -> Iterator[tuple[list[str], Iterator[Sequence[Any]]]]:
+        allow_write: bool,
+    ) -> Iterator[QueryExecutionPayload]:
         engine = self._create_engine(server=server, database_name=database_name)
         try:
             with engine.connect() as connection:
                 transaction = connection.begin()
                 try:
                     result = connection.execute(text(query))
-                    yield list(result.keys()), result
+                    if result.returns_rows:
+                        yield QueryExecutionPayload(
+                            columns=list(result.keys()),
+                            rows=result,
+                            affected_row_count=None,
+                        )
+                    else:
+                        affected_row_count = result.rowcount if result.rowcount >= 0 else None
+                        yield QueryExecutionPayload(
+                            columns=[],
+                            rows=None,
+                            affected_row_count=affected_row_count,
+                        )
+                    if allow_write:
+                        transaction.commit()
                 finally:
                     if transaction.is_active:
                         transaction.rollback()
@@ -321,6 +346,9 @@ class ExcelExportBuffer:
         return normalized_columns
 
     def add_result_row(self, row: dict[str, Any]) -> None:
+        for column_name in row:
+            if column_name not in self._result_columns:
+                self._result_columns.append(column_name)
         self._write_json_line(self._results_buffer, row)
 
     def add_error(self, error: ExportError) -> None:
@@ -400,6 +428,8 @@ class DatabaseResultExporter:
         input_path: Path,
         query: str,
         output_path: Path,
+        allow_write: bool,
+        target_database_name: str | None = None,
     ) -> ExportSummary:
         servers, input_errors = self._input_reader.read(input_path=input_path)
         workbook_buffer = ExcelExportBuffer()
@@ -427,24 +457,27 @@ class DatabaseResultExporter:
                 server.port,
                 server.source_row,
             )
-            try:
-                database_names = self._connector.discover_databases(server=server)
-            except Exception as exc:
-                error = ExportError(
-                    server_ip=server.host,
-                    port=server.port,
-                    database_name=None,
-                    error_message=str(exc),
-                )
-                self._logger.error(
-                    "database_discovery_failed server_ip=%s port=%s error=%s",
-                    server.host,
-                    server.port,
-                    exc,
-                )
-                workbook_buffer.add_error(error)
-                error_count += 1
-                continue
+            if target_database_name is None:
+                try:
+                    database_names = self._connector.discover_databases(server=server)
+                except Exception as exc:
+                    error = ExportError(
+                        server_ip=server.host,
+                        port=server.port,
+                        database_name=None,
+                        error_message=str(exc),
+                    )
+                    self._logger.error(
+                        "database_discovery_failed server_ip=%s port=%s error=%s",
+                        server.host,
+                        server.port,
+                        exc,
+                    )
+                    workbook_buffer.add_error(error)
+                    error_count += 1
+                    continue
+            else:
+                database_names = [target_database_name]
 
             self._logger.info(
                 "server_databases_discovered server_ip=%s port=%s count=%s",
@@ -452,54 +485,68 @@ class DatabaseResultExporter:
                 server.port,
                 len(database_names),
             )
-            for database_name in database_names:
+            for current_database_name in database_names:
                 databases_scanned += 1
                 try:
-                    with self._connector.stream_query_rows(
+                    with self._connector.execute_query(
                         server=server,
-                        database_name=database_name,
+                        database_name=current_database_name,
                         query=query,
-                    ) as (raw_columns, rows):
-                        normalized_columns = workbook_buffer.register_query_columns(raw_columns)
-                        row_count = 0
-                        for row in rows:
-                            row_count += 1
-                            payload = {
-                                "server_ip": server.host,
-                                "port": server.port,
-                                "database_name": database_name,
-                                "scan_status": "ok",
-                            }
-                            payload.update(
-                                self._build_query_payload(
-                                    row=row,
-                                    normalized_columns=normalized_columns,
-                                )
-                            )
-                            workbook_buffer.add_result_row(payload)
-
-                        if row_count == 0:
+                        allow_write=allow_write,
+                    ) as execution_payload:
+                        if execution_payload.rows is None:
                             workbook_buffer.add_result_row(
                                 {
                                     "server_ip": server.host,
                                     "port": server.port,
-                                    "database_name": database_name,
-                                    "scan_status": "no_rows",
+                                    "database_name": current_database_name,
+                                    "scan_status": SCAN_STATUS_WRITE_OK,
+                                    "affected_row_count": execution_payload.affected_row_count,
                                 }
                             )
+                        else:
+                            normalized_columns = workbook_buffer.register_query_columns(
+                                execution_payload.columns
+                            )
+                            row_count = 0
+                            for row in execution_payload.rows:
+                                row_count += 1
+                                payload = {
+                                    "server_ip": server.host,
+                                    "port": server.port,
+                                    "database_name": current_database_name,
+                                    "scan_status": SCAN_STATUS_QUERY_OK,
+                                }
+                                payload.update(
+                                    self._build_query_payload(
+                                        row=row,
+                                        normalized_columns=normalized_columns,
+                                    )
+                                )
+                                workbook_buffer.add_result_row(payload)
+
+                            if row_count == 0:
+                                workbook_buffer.add_result_row(
+                                    {
+                                        "server_ip": server.host,
+                                        "port": server.port,
+                                        "database_name": current_database_name,
+                                        "scan_status": SCAN_STATUS_NO_ROWS,
+                                    }
+                                )
                         success_count += 1
                 except Exception as exc:
                     error = ExportError(
                         server_ip=server.host,
                         port=server.port,
-                        database_name=database_name,
+                        database_name=current_database_name,
                         error_message=str(exc),
                     )
                     self._logger.error(
                         "database_query_failed server_ip=%s port=%s database_name=%s error=%s",
                         server.host,
                         server.port,
-                        database_name,
+                        current_database_name,
                         exc,
                     )
                     workbook_buffer.add_error(error)
@@ -528,7 +575,10 @@ class DatabaseResultExporter:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Scan SQL Server instances, run one query on each non-system database, and export the results to Excel.",
+        description=(
+            "Scan SQL Server instances, run one query on each non-system database, and export "
+            "the results to Excel. Queries are read-only by default."
+        ),
     )
     parser.add_argument(
         "--input",
@@ -539,6 +589,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         required=True,
         help="Path to the output Excel workbook.",
+    )
+    parser.add_argument(
+        "--database",
+        help=(
+            "Optional exact database name to run against on every server. "
+            "When omitted, all non-system databases are scanned."
+        ),
     )
     query_group = parser.add_mutually_exclusive_group(required=True)
     query_group.add_argument(
@@ -565,6 +622,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging level for the command.",
+    )
+    parser.add_argument(
+        "--allow-write",
+        action="store_true",
+        help=(
+            "Allow non-read-only SQL and commit the transaction per database. "
+            "Use only for intentional data changes."
+        ),
     )
     return parser
 
@@ -600,16 +665,25 @@ def _sanitize_query_for_validation(query_text: str) -> str:
     return SQL_STRING_LITERAL_PATTERN.sub("''", without_line_comments)
 
 
-def load_query_text(*, inline_query: str | None, query_file: str | None) -> str:
+def load_query_text(
+    *,
+    inline_query: str | None,
+    query_file: str | None,
+    allow_write: bool,
+) -> str:
     if inline_query:
         query_text = inline_query.strip()
         if not query_text:
             raise ValueError("Query text must not be empty.")
+        if allow_write:
+            return query_text
         return validate_read_only_query(query_text)
     if query_file:
         query_text = Path(query_file).read_text(encoding="utf-8").strip()
         if not query_text:
             raise ValueError("Query file is empty.")
+        if allow_write:
+            return query_text
         return validate_read_only_query(query_text)
     raise ValueError("Either --query or --query-file must be provided.")
 
@@ -641,6 +715,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     query_text = load_query_text(
         inline_query=args.query,
         query_file=args.query_file,
+        allow_write=args.allow_write,
     )
     exporter = DatabaseResultExporter(
         input_reader=ServerInputReader(),
@@ -654,6 +729,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         input_path=Path(args.input).resolve(),
         query=query_text,
         output_path=Path(args.output).resolve(),
+        allow_write=args.allow_write,
+        target_database_name=args.database,
     )
     summary_text = format_summary(summary)
     logger.info("export_completed\n%s", summary_text)

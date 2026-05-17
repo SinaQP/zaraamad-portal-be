@@ -1,13 +1,15 @@
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
 from openpyxl import Workbook, load_workbook
 
 from app.commands.export_db_results import (
     DatabaseResultExporter,
+    ExcelExportBuffer,
     ExportSummary,
+    QueryExecutionPayload,
     ServerInputReader,
-    SqlServerConnector,
     configure_logging,
     load_query_text,
     validate_read_only_query,
@@ -21,12 +23,46 @@ class FakeSqlServerConnector:
         return ["main_db", "empty_db"]
 
     @contextmanager
-    def stream_query_rows(self, *, server, database_name: str, query: str):
-        del server, query
+    def execute_query(
+        self,
+        *,
+        server,
+        database_name: str,
+        query: str,
+        allow_write: bool,
+    ):
+        del server, query, allow_write
         if database_name == "main_db":
-            yield ["id", "server_ip"], iter([(1, "from_query")])
+            yield QueryExecutionPayload(
+                columns=["id", "server_ip"],
+                rows=iter([(1, "from_query")]),
+                affected_row_count=None,
+            )
             return
-        yield ["id"], iter([])
+        yield QueryExecutionPayload(columns=["id"], rows=iter([]), affected_row_count=None)
+
+
+class SingleDatabaseConnector:
+    def discover_databases(self, *, server):
+        del server
+        raise AssertionError("Database discovery should not run when --database is provided.")
+
+    @contextmanager
+    def execute_query(
+        self,
+        *,
+        server,
+        database_name: str,
+        query: str,
+        allow_write: bool,
+    ):
+        del server, query, allow_write
+        assert database_name == "PortalDb"
+        yield QueryExecutionPayload(
+            columns=["RowsToUpdate", "UpdatedRows"],
+            rows=iter([(15, 0)]),
+            affected_row_count=None,
+        )
 
 
 def test_server_input_reader_reads_xlsx_with_header_normalization(
@@ -90,6 +126,7 @@ def test_exporter_writes_results_and_errors_workbook(tmp_path: Path) -> None:
         input_path=input_path,
         query="SELECT 1",
         output_path=output_path,
+        allow_write=False,
     )
 
     assert summary == ExportSummary(
@@ -123,13 +160,61 @@ def test_exporter_writes_results_and_errors_workbook(tmp_path: Path) -> None:
     assert "server unavailable" in errors_rows[1][3]
 
 
+def test_exporter_uses_explicit_database_without_discovery(tmp_path: Path) -> None:
+    input_path = tmp_path / "servers.csv"
+    output_path = tmp_path / "db_results.xlsx"
+    input_path.write_text(
+        "ip,port,username,password\n10.0.0.1,1433,sa,secret\n",
+        encoding="utf-8",
+    )
+
+    exporter = DatabaseResultExporter(
+        input_reader=ServerInputReader(),
+        connector=SingleDatabaseConnector(),
+        logger=configure_logging(log_level="INFO"),
+    )
+    summary = exporter.run(
+        input_path=input_path,
+        query="SELECT 1",
+        output_path=output_path,
+        allow_write=False,
+        target_database_name="PortalDb",
+    )
+
+    assert summary == ExportSummary(
+        servers_processed=1,
+        databases_scanned=1,
+        success_count=1,
+        error_count=0,
+        output_path=output_path,
+    )
+
+    workbook = load_workbook(output_path)
+    try:
+        results_rows = list(workbook["results"].iter_rows(values_only=True))
+    finally:
+        workbook.close()
+
+    assert results_rows[0] == (
+        "server_ip",
+        "port",
+        "database_name",
+        "scan_status",
+        "RowsToUpdate",
+        "UpdatedRows",
+    )
+    assert results_rows[1] == ("10.0.0.1", 1433, "PortalDb", "ok", 15, 0)
+
+
 def test_load_query_text_supports_query_file(tmp_path: Path) -> None:
     query_file = tmp_path / "query.sql"
     query_file.write_text("SELECT TOP 1 name FROM sys.databases;", encoding="utf-8")
 
-    assert load_query_text(inline_query=None, query_file=str(query_file)) == (
-        "SELECT TOP 1 name FROM sys.databases;"
-    )
+    assert load_query_text(
+        inline_query=None,
+        query_file=str(query_file),
+        allow_write=False,
+    ) == "SELECT TOP 1 name FROM sys.databases;"
 
 
 def test_validate_read_only_query_allows_declare_and_select() -> None:
@@ -153,9 +238,64 @@ def test_validate_read_only_query_rejects_write_statements() -> None:
     DELETE FROM dbo.Customers;
     """
 
-    try:
+    with pytest.raises(ValueError, match="delete"):
         validate_read_only_query(query_text)
-    except ValueError as exc:
-        assert "delete" in str(exc).lower()
-    else:
-        raise AssertionError("Expected read-only validation to reject DELETE statements.")
+
+
+def test_load_query_text_rejects_write_query_in_default_mode() -> None:
+    with pytest.raises(ValueError, match="Only read-only SQL is allowed"):
+        load_query_text(
+            inline_query="UPDATE Cor.Persons SET FirstName = FirstName",
+            query_file=None,
+            allow_write=False,
+        )
+
+
+def test_load_query_text_accepts_write_query_when_allow_write_enabled() -> None:
+    query_text = load_query_text(
+        inline_query="UPDATE Cor.Persons SET FirstName = FirstName",
+        query_file=None,
+        allow_write=True,
+    )
+
+    assert query_text == "UPDATE Cor.Persons SET FirstName = FirstName"
+
+
+def test_excel_export_buffer_persists_runtime_columns(tmp_path: Path) -> None:
+    buffer = ExcelExportBuffer()
+    buffer.add_result_row(
+        {
+            "server_ip": "10.10.10.10",
+            "port": 1433,
+            "database_name": "PortalDb",
+            "scan_status": "write_ok",
+            "affected_row_count": 12,
+        }
+    )
+
+    output_path = tmp_path / "result.xlsx"
+    buffer.save(output_path=output_path)
+
+    workbook = load_workbook(filename=output_path, read_only=True, data_only=True)
+    try:
+        results_sheet = workbook["results"]
+        rows = list(results_sheet.iter_rows(values_only=True))
+    finally:
+        workbook.close()
+
+    assert rows[0] == (
+        "server_ip",
+        "port",
+        "database_name",
+        "scan_status",
+        "affected_row_count",
+    )
+    assert rows[1] == ("10.10.10.10", 1433, "PortalDb", "write_ok", 12)
+
+
+def test_normalize_person_names_sql_defaults_to_preview_mode() -> None:
+    query_text = Path("docs/db_export/normalize_person_names.sql").read_text(encoding="utf-8")
+
+    assert "DECLARE @ApplyChanges bit = 0;" in query_text
+    assert "@RowsToUpdate AS [RowsToUpdate]" in query_text
+    assert "@UpdatedRows AS [UpdatedRows]" in query_text
